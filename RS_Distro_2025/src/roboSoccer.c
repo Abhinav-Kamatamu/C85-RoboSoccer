@@ -72,6 +72,11 @@
 #include "roboAI.h"
 #include "API/btcomm.h"
 
+#ifndef HEXKEY
+	#define HEXKEY "00:16:53:56:55:D9"
+#endif
+
+
 // Replace your robot's hex identifier here so the code can talk to it.
 #ifndef HEXKEY
 	#define HEXKEY "00:16:53:3F:00:00"

@@ -29,6 +29,7 @@
 ***************************************************************************/
 
 #include "roboAI.h"			// <--- Look at this header file!
+#include "logic/mode_penalty.h"
 extern int sx;              // Get access to the image size from the imageCapture module
 extern int sy;
 int laggy=0;
@@ -773,6 +774,12 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
    state transitions and with calling the appropriate function based on what
    the bot is supposed to be doing.
   *****************************************************************************/
+  if (ai->st.state>=101 && ai->st.state<200)
+  {
+   mode_penalty_step(ai, blobs);  // see src/logic/mode_penalty.c; mirrors notes/fsm/penalty.dot
+  }
+  // TODO: mode_chase_step() / mode_soccer_step() go here once those modes exist,
+  // same dispatch pattern (state range -> one function call).
 //  fprintf(stderr,"Just trackin'!\n");	// bot, opponent, and ball.
 //  track_agents(ai,blobs);		// Currently, does nothing but endlessly track
  }
