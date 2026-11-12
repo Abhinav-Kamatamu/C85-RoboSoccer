@@ -3,10 +3,6 @@
 #include "geometry.h"
 #include <math.h>
 
-double clampd(double v, double lo, double hi) {
-    return (v < lo) ? lo : (v > hi) ?  hi : v;
-}
-
 double heading_err_rad(const World *w, Vec2 target) {
     double desired = angle_of(vec2_sub(target, w->self.pos));
     return angle_diff_rad(desired, angle_of(w->self.heading));
@@ -201,7 +197,7 @@ SkillStatus skill_backoff(
 
 SkillStatus skill_hold(const World *w, Motion *out) {
     // For the intellisense
-    (const const const const const const const const)w;
+    (void)w;
     // The hold skill does literally nothing. This is the default
     // active skill. We change to another skill when there's something to do
     // and return if we're done and there's nothing else pending

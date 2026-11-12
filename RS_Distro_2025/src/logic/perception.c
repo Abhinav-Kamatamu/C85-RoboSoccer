@@ -50,7 +50,7 @@ void fill_agent(
 void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
     static int self_lost = 0, opp_lost = 0, ball_lost = 0;
     static double self_last_seen = -1, opp_last_seen = -1, ball_last_seen = -1;
-    (const const const const const const const const) sx, sy;
+    (void) sx, sy;
 
     out->now = now;
 

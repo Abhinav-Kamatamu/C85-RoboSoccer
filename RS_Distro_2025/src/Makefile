@@ -108,7 +108,10 @@ am_roboSoccer_OBJECTS = roboSoccer.$(OBJEXT) \
 	imagecapture/gui.$(OBJEXT) imagecapture/imageProc.$(OBJEXT) \
 	imagecapture/svdDynamic.$(OBJEXT) imagecapture/utils.$(OBJEXT) \
 	imagecapture/v4l2uvc.$(OBJEXT) API/btcomm.$(OBJEXT) \
-	roboAI.$(OBJEXT)
+	roboAI.$(OBJEXT) logic/geometry.$(OBJEXT) \
+	logic/skills.$(OBJEXT) logic/drive.$(OBJEXT) \
+	logic/fsm.$(OBJEXT) logic/perception.$(OBJEXT) \
+	logic/mode_penalty.$(OBJEXT)
 roboSoccer_OBJECTS = $(am_roboSoccer_OBJECTS)
 roboSoccer_LDADD = $(LDADD)
 AM_V_P = $(am__v_P_$(V))
@@ -133,7 +136,10 @@ am__depfiles_remade = ./$(DEPDIR)/roboAI.Po ./$(DEPDIR)/roboSoccer.Po \
 	imagecapture/$(DEPDIR)/imageProc.Po \
 	imagecapture/$(DEPDIR)/svdDynamic.Po \
 	imagecapture/$(DEPDIR)/utils.Po \
-	imagecapture/$(DEPDIR)/v4l2uvc.Po
+	imagecapture/$(DEPDIR)/v4l2uvc.Po logic/$(DEPDIR)/drive.Po \
+	logic/$(DEPDIR)/fsm.Po logic/$(DEPDIR)/geometry.Po \
+	logic/$(DEPDIR)/mode_penalty.Po logic/$(DEPDIR)/perception.Po \
+	logic/$(DEPDIR)/skills.Po
 am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
@@ -222,10 +228,10 @@ SHELL = /bin/bash
 STRIP = 
 VERSION = 1.0
 XMKMF = 
-abs_builddir = /home/strider/Desktop/RS_Distro_2024/src
-abs_srcdir = /home/strider/Desktop/RS_Distro_2024/src
-abs_top_builddir = /home/strider/Desktop/RS_Distro_2024
-abs_top_srcdir = /home/strider/Desktop/RS_Distro_2024
+abs_builddir = /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025/src
+abs_srcdir = /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025/src
+abs_top_builddir = /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025
+abs_top_srcdir = /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025
 ac_ct_CC = gcc
 am__include = include
 am__leading_dot = .
@@ -252,7 +258,7 @@ host_vendor = pc
 htmldir = ${docdir}
 includedir = ${prefix}/include
 infodir = ${datarootdir}/info
-install_sh = ${SHELL} /home/strider/Desktop/RS_Distro_2024/install-sh
+install_sh = ${SHELL} /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025/install-sh
 libdir = ${exec_prefix}/lib
 libexecdir = ${exec_prefix}/libexec
 localedir = ${datarootdir}/locale
@@ -261,7 +267,7 @@ mandir = ${datarootdir}/man
 mkdir_p = $(MKDIR_P)
 oldincludedir = /usr/include
 pdfdir = ${docdir}
-prefix = /home/strider/Desktop/RS_Distro_2024
+prefix = /home/adeolaoloruntobi64/Documents/CSCC85/C85-RoboSoccer/RS_Distro_2025
 program_transform_name = s,x,x,
 psdir = ${docdir}
 runstatedir = ${localstatedir}/run
@@ -274,7 +280,8 @@ top_build_prefix = ../
 top_builddir = ..
 top_srcdir = ..
 roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avilib.c imagecapture/color.c imagecapture/gui.c imagecapture/imageProc.c imagecapture/svdDynamic.c imagecapture/utils.c imagecapture/v4l2uvc.c \
-			API/btcomm.c roboAI.c
+			API/btcomm.c roboAI.c \
+			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c
 
 AM_CPPFLAGS = -fpermissive
 all: all-am
@@ -382,6 +389,24 @@ API/$(DEPDIR)/$(am__dirstamp):
 	@: > API/$(DEPDIR)/$(am__dirstamp)
 API/btcomm.$(OBJEXT): API/$(am__dirstamp) \
 	API/$(DEPDIR)/$(am__dirstamp)
+logic/$(am__dirstamp):
+	@$(MKDIR_P) logic
+	@: > logic/$(am__dirstamp)
+logic/$(DEPDIR)/$(am__dirstamp):
+	@$(MKDIR_P) logic/$(DEPDIR)
+	@: > logic/$(DEPDIR)/$(am__dirstamp)
+logic/geometry.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/skills.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/drive.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/fsm.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/perception.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_penalty.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
 
 roboSoccer$(EXEEXT): $(roboSoccer_OBJECTS) $(roboSoccer_DEPENDENCIES) $(EXTRA_roboSoccer_DEPENDENCIES) 
 	@rm -f roboSoccer$(EXEEXT)
@@ -391,6 +416,7 @@ mostlyclean-compile:
 	-rm -f *.$(OBJEXT)
 	-rm -f API/*.$(OBJEXT)
 	-rm -f imagecapture/*.$(OBJEXT)
+	-rm -f logic/*.$(OBJEXT)
 
 distclean-compile:
 	-rm -f *.tab.c
@@ -406,6 +432,12 @@ include imagecapture/$(DEPDIR)/imageProc.Po # am--include-marker
 include imagecapture/$(DEPDIR)/svdDynamic.Po # am--include-marker
 include imagecapture/$(DEPDIR)/utils.Po # am--include-marker
 include imagecapture/$(DEPDIR)/v4l2uvc.Po # am--include-marker
+include logic/$(DEPDIR)/drive.Po # am--include-marker
+include logic/$(DEPDIR)/fsm.Po # am--include-marker
+include logic/$(DEPDIR)/geometry.Po # am--include-marker
+include logic/$(DEPDIR)/mode_penalty.Po # am--include-marker
+include logic/$(DEPDIR)/perception.Po # am--include-marker
+include logic/$(DEPDIR)/skills.Po # am--include-marker
 
 $(am__depfiles_remade):
 	@$(MKDIR_P) $(@D)
@@ -550,6 +582,8 @@ distclean-generic:
 	-rm -f API/$(am__dirstamp)
 	-rm -f imagecapture/$(DEPDIR)/$(am__dirstamp)
 	-rm -f imagecapture/$(am__dirstamp)
+	-rm -f logic/$(DEPDIR)/$(am__dirstamp)
+	-rm -f logic/$(am__dirstamp)
 
 maintainer-clean-generic:
 	@echo "This command is intended for maintainers to use"
@@ -570,6 +604,12 @@ distclean: distclean-am
 	-rm -f imagecapture/$(DEPDIR)/svdDynamic.Po
 	-rm -f imagecapture/$(DEPDIR)/utils.Po
 	-rm -f imagecapture/$(DEPDIR)/v4l2uvc.Po
+	-rm -f logic/$(DEPDIR)/drive.Po
+	-rm -f logic/$(DEPDIR)/fsm.Po
+	-rm -f logic/$(DEPDIR)/geometry.Po
+	-rm -f logic/$(DEPDIR)/mode_penalty.Po
+	-rm -f logic/$(DEPDIR)/perception.Po
+	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile
 distclean-am: clean-am distclean-compile distclean-generic \
 	distclean-tags
@@ -626,6 +666,12 @@ maintainer-clean: maintainer-clean-am
 	-rm -f imagecapture/$(DEPDIR)/svdDynamic.Po
 	-rm -f imagecapture/$(DEPDIR)/utils.Po
 	-rm -f imagecapture/$(DEPDIR)/v4l2uvc.Po
+	-rm -f logic/$(DEPDIR)/drive.Po
+	-rm -f logic/$(DEPDIR)/fsm.Po
+	-rm -f logic/$(DEPDIR)/geometry.Po
+	-rm -f logic/$(DEPDIR)/mode_penalty.Po
+	-rm -f logic/$(DEPDIR)/perception.Po
+	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile
 maintainer-clean-am: distclean-am maintainer-clean-generic
 
