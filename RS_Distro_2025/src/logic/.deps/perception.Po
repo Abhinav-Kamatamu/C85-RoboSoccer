@@ -245,7 +245,7 @@ logic/perception.o: logic/perception.c /usr/include/stdc-predef.h \
  logic/../API/c_com.h /usr/include/dirent.h \
  /usr/include/x86_64-linux-gnu/bits/dirent.h \
  /usr/include/x86_64-linux-gnu/bits/dirent_ext.h logic/../API/lmstypes.h \
- logic/ai_config.h
+ logic/ai_config.h logic/geometry.h logic/gyro.h
 /usr/include/stdc-predef.h:
 logic/perception.h:
 logic/world.h:
@@ -563,3 +563,5 @@ logic/../API/c_com.h:
 /usr/include/x86_64-linux-gnu/bits/dirent_ext.h:
 logic/../API/lmstypes.h:
 logic/ai_config.h:
+logic/geometry.h:
+logic/gyro.h:

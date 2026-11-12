@@ -27,15 +27,16 @@
 #include <stdlib.h>
 
 // Change this to match the ports your bots motors are connected to
-// Measured on the real robot (bench test 5): A = left wheel, D = right
-// wheel, C = the third motor driving the fork/prong, B = gyro (unused by
-// any code in this project -- it's a sensor, nothing here reads it).
+// Measured on the real robot. A = left wheel, D = right
+// wheel, C = the third motor driving the fork/prong. Motor port B is
+// unused.
 #define LEFT_MOTOR MOTOR_A
 #define RIGHT_MOTOR MOTOR_D
-#define KICK_MOTOR MOTOR_C   // not driven by any code yet -- drive.c only
-                              // controls the two wheels; wiring this up is
-                              // new work, not something that falls out of
-                              // the existing skills/Motion abstraction
+#define KICK_MOTOR MOTOR_C
+
+// CONFIRM THIS!!! the gyro is a SENSOR, plugged into one of the 4 SENSOR
+// ports (PORT_1..PORT_4)
+#define GYRO_PORT PORT_2
 
 #define AI_SOCCER 0 	// Play soccer!
 #define AI_PENALTY 1    // Go score some goals!

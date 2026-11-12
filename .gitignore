@@ -1,1 +1,4 @@
 .local
+RS_Distro_2025/src/simulatte
+*.o
+RS_Distro_2025/src/roboSoccer

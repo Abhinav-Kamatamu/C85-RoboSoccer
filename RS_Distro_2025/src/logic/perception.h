@@ -1,9 +1,8 @@
 /***************************************************
- CSC C85 RoboSoccer - perception (layer 1)
+ CSC C85 RoboSoccer, perception
 
  Builds a World out of struct AI_data for one frame. Pixels -> cm here
- (PX_PER_CM_X/Y, ai_config.h); nothing downstream of this ever touches a
- blob pointer or pixel units again.
+ (PX_PER_CM_X/Y, ai_config.h)
 
  struct RoboAI is forward-declared, not included, so this header stays
  cheap to include from geometry/skills callers that only need World.

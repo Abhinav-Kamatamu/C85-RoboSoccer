@@ -111,7 +111,8 @@ am_roboSoccer_OBJECTS = roboSoccer.$(OBJEXT) \
 	roboAI.$(OBJEXT) logic/geometry.$(OBJEXT) \
 	logic/skills.$(OBJEXT) logic/drive.$(OBJEXT) \
 	logic/fsm.$(OBJEXT) logic/perception.$(OBJEXT) \
-	logic/mode_penalty.$(OBJEXT)
+	logic/mode_penalty.$(OBJEXT) \
+	logic/mode_penalty_adapter.$(OBJEXT) logic/gyro.$(OBJEXT)
 roboSoccer_OBJECTS = $(am_roboSoccer_OBJECTS)
 roboSoccer_LDADD = $(LDADD)
 AM_V_P = $(am__v_P_$(V))
@@ -138,8 +139,9 @@ am__depfiles_remade = ./$(DEPDIR)/roboAI.Po ./$(DEPDIR)/roboSoccer.Po \
 	imagecapture/$(DEPDIR)/utils.Po \
 	imagecapture/$(DEPDIR)/v4l2uvc.Po logic/$(DEPDIR)/drive.Po \
 	logic/$(DEPDIR)/fsm.Po logic/$(DEPDIR)/geometry.Po \
-	logic/$(DEPDIR)/mode_penalty.Po logic/$(DEPDIR)/perception.Po \
-	logic/$(DEPDIR)/skills.Po
+	logic/$(DEPDIR)/gyro.Po logic/$(DEPDIR)/mode_penalty.Po \
+	logic/$(DEPDIR)/mode_penalty_adapter.Po \
+	logic/$(DEPDIR)/perception.Po logic/$(DEPDIR)/skills.Po
 am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
@@ -281,7 +283,7 @@ top_builddir = ..
 top_srcdir = ..
 roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avilib.c imagecapture/color.c imagecapture/gui.c imagecapture/imageProc.c imagecapture/svdDynamic.c imagecapture/utils.c imagecapture/v4l2uvc.c \
 			API/btcomm.c roboAI.c \
-			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c
+			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c logic/mode_penalty_adapter.c logic/gyro.c
 
 AM_CPPFLAGS = -fpermissive
 all: all-am
@@ -407,6 +409,10 @@ logic/perception.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
 logic/mode_penalty.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_penalty_adapter.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/gyro.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
 
 roboSoccer$(EXEEXT): $(roboSoccer_OBJECTS) $(roboSoccer_DEPENDENCIES) $(EXTRA_roboSoccer_DEPENDENCIES) 
 	@rm -f roboSoccer$(EXEEXT)
@@ -435,7 +441,9 @@ include imagecapture/$(DEPDIR)/v4l2uvc.Po # am--include-marker
 include logic/$(DEPDIR)/drive.Po # am--include-marker
 include logic/$(DEPDIR)/fsm.Po # am--include-marker
 include logic/$(DEPDIR)/geometry.Po # am--include-marker
+include logic/$(DEPDIR)/gyro.Po # am--include-marker
 include logic/$(DEPDIR)/mode_penalty.Po # am--include-marker
+include logic/$(DEPDIR)/mode_penalty_adapter.Po # am--include-marker
 include logic/$(DEPDIR)/perception.Po # am--include-marker
 include logic/$(DEPDIR)/skills.Po # am--include-marker
 
@@ -607,7 +615,9 @@ distclean: distclean-am
 	-rm -f logic/$(DEPDIR)/drive.Po
 	-rm -f logic/$(DEPDIR)/fsm.Po
 	-rm -f logic/$(DEPDIR)/geometry.Po
+	-rm -f logic/$(DEPDIR)/gyro.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
+	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po
 	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile
@@ -669,7 +679,9 @@ maintainer-clean: maintainer-clean-am
 	-rm -f logic/$(DEPDIR)/drive.Po
 	-rm -f logic/$(DEPDIR)/fsm.Po
 	-rm -f logic/$(DEPDIR)/geometry.Po
+	-rm -f logic/$(DEPDIR)/gyro.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
+	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po
 	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile

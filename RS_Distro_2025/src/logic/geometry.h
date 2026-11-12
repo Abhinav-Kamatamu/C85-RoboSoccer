@@ -59,72 +59,11 @@ int ball_in_goal(Vec2 ball_pos, Vec2 goal, double goal_width, double field_cente
 // Perpendicular distance from `p` to the infinite line through `a` and `b`.
 double perp_dist_to_line(Vec2 p, Vec2 a, Vec2 b);
 
-/***************************************************
- Segment-based boundary model.
-
- NOT USED YET: World/perception.c/mode_penalty.c still use the plain
- field_min/field_max rectangle above. This is the general replacement for
- when we actually have boundry data
-***************************************************/
-
-typedef struct {
-    int    is_arc;           
-    Vec2   a, b;             
-    Vec2   arc_center;       
-    double radius_cm;        
-    double angle_start_rad, angle_end_rad;
-} BoundarySegment;
-
-typedef struct {
-    const BoundarySegment *segments;
-    int n_segments;
-    Vec2 bbox_min, bbox_max; 
-} FieldModel;
-
-
-void field_model_finalize(FieldModel *field);
-
-BoundarySegment make_straight_segment(Vec2 a, Vec2 b);
-// a, b: the two measured points where the curve starts and ends (e.g. the
-// straightedge-tangent-point method). center/radius_cm as measured or
-// looked up (e.g. a standard track piece's radius). Computes
-// angle_start/end from a and b so callers never hand-compute angles.
-BoundarySegment make_arc_segment(Vec2 center, double radius_cm, Vec2 a, Vec2 b);
-
-typedef struct {
-    double distance;  // to the nearest boundary feature
-    Vec2   direction;  // unit vector pointing away from it, into the field;
-                        // (0,0) when `distance` is large enough that a
-                        // meaningful direction wasn't computed (see
-                        // nearest_wall()'s fast-reject path)
-} WallQuery;
-
-// Distance + direction to the nearest point on the boundary, in one pass
-// (replaces separately calling a distance function and a direction
-// function against the same position).
-//
-// `safe_margin_cm`: if `pos` is at least this far inside the field's
-// bounding box on every side, skip the real search and report that bbox
-// distance directly -- cheap, but only a lower bound for a non-convex
-// shape, so pick something comfortably larger than any margin you intend
-// to compare `distance` against (e.g. 2x your largest WALL_MARGIN).
-// Assumes the boundary loop is reasonably convex (true for a field-shaped
-// track); this is a performance shortcut, not a correctness guarantee.
-//
-// `hint`: optional (NULL is fine) in/out cache of "which segment index was
-// nearest last time," owned by the caller (one per agent you're tracking,
-// same static-local convention as the rest of this codebase, e.g.
-// skills.c's `reset` pattern). When valid, only that segment and its two
-// immediate neighbours are checked -- the nearest segment essentially
-// never jumps further than that between consecutive frames of a slowly
-// moving agent. Falls back to a full scan over every segment only when
-// there's no usable hint yet (first call, or the caller opted out).
-//
-// Adding real spatial binning later (skipped for now -- not needed at the
-// segment counts a track-piece field produces) only means replacing the
-// full-scan loop inside this function with a grid-cell lookup that yields
-// a short candidate list instead of every segment. Nothing in this
-// function's signature, or any caller, needs to change.
-WallQuery nearest_wall(Vec2 pos, const FieldModel *field, double safe_margin_cm, int *hint);
+// Per-frame fix for the blob-shape heading vector's 180deg switching. it's
+// the long axis of a rectangle, which can't tell front from back, and can
+// flip sign on any given frame.
+// id_bot() corrects this ONCE at startup by comparing against the motion
+// vector, but that correction doesn't persist.
+Vec2 fix_heading_sign(Vec2 raw, Vec2 vel, double trust_speed_cmps, Vec2 *last_good);
 
 #endif

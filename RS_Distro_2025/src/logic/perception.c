@@ -1,12 +1,24 @@
 #include "perception.h"
 #include "../roboAI.h"
 #include "ai_config.h"
+#include "geometry.h"
+#include "gyro.h"
+#include <math.h>
 
 void fill_agent(
     Agent *a, int seen, double cx, double cy, double vx_px,
     double vy_px, double dx, double dy, double now, int *lost_counter,
-    double *last_seen_t
+    double *last_seen_t, Vec2 *last_good_heading
 ) {
+    if (seen && *last_seen_t >= 0) {
+        double dt_check = now - *last_seen_t;
+        if (dt_check > 0) {
+            double implied_speed =
+                vec2_len((Vec2){vx_px / PX_PER_CM_X, vy_px / PX_PER_CM_Y}) / dt_check;
+            if (implied_speed > MAX_PLAUSIBLE_SPEED_CMPS) seen = 0;
+        }
+    }
+
     if (seen) {
         // We've seen it, so this object is not lost
         *lost_counter = 0;
@@ -28,9 +40,13 @@ void fill_agent(
         // corrections
         a->vel.x = (vx_px / PX_PER_CM_X) / dt;
         a->vel.y = (vy_px / PX_PER_CM_Y) / dt;
-        // Set out directions
-        a->heading.x = dx;
-        a->heading.y = dy;
+        if (last_good_heading) {
+            Vec2 raw = {dx, dy};
+            a->heading = fix_heading_sign(raw, a->vel, HEADING_SIGN_TRUST_CMPS, last_good_heading);
+        } else {
+            a->heading.x = 0;
+            a->heading.y = 0;
+        }
     } else {
         // We are in fact, lost
         (*lost_counter)++;
@@ -42,33 +58,57 @@ void fill_agent(
         a->pos.y = 0;
         a->vel.x = 0;
         a->vel.y = 0;
-        a->heading.x = 0;
-        a->heading.y = 0;
+        // Persist the last known heading through a dropout instead of
+        // zeroing it. atan2(0,0) silently returns 0 (due-+x), which is a
+        // worse answer than "whatever we last knew" for the handful of
+        // frames before lost_frames crosses LOST_FRAMES and the FSM gives
+        // up on this agent entirely -- until then it's still actively
+        // steering off this heading. No last_good_heading (the ball) ->
+        // still zero, matches world.h's documented "don't need it".
+        a->heading = last_good_heading ? *last_good_heading : (Vec2){0, 0};
     }
 }
 
 void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
     static int self_lost = 0, opp_lost = 0, ball_lost = 0;
     static double self_last_seen = -1, opp_last_seen = -1, ball_last_seen = -1;
-    (void) sx, sy;
+    static Vec2 self_last_heading = {0, 0}, opp_last_heading = {0, 0};
+    static double self_last_tick = -1;
+    (void)sx;
+    (void)sy;
 
     out->now = now;
 
+    int self_seen = ai->st.selfID && ai->st.self;
+    double tick_dt = (self_last_tick < 0) ? 0 : (now - self_last_tick);
+    self_last_tick = now;
+
     // Fill out the fields of our agents for each different object
     fill_agent(
-        &out->self, ai->st.selfID && ai->st.self,
+        &out->self, self_seen,
         ai->st.self ? ai->st.self->cx : 0,
         ai->st.self ? ai->st.self->cy : 0,
         ai->st.svx, ai->st.svy, ai->st.sdx,
-        ai->st.sdy, now, &self_lost, &self_last_seen
+        ai->st.sdy, now, &self_lost, &self_last_seen, &self_last_heading
     );
+
+    if (!self_seen && tick_dt > 0) {
+        double angle_s;
+        double rate_deg_s;
+        if (gyro_read_rate(&angle_s, &rate_deg_s)) {
+            double ang = angle_of(out->self.heading) + deg_to_rad(rate_deg_s) * tick_dt;
+            // TODO: compare with actual angle reading
+            out->self.heading = (Vec2){cos(ang), sin(ang)};
+            self_last_heading = out->self.heading; // keep fix_heading_sign's prior in sync
+        }
+    }
 
     fill_agent(
         &out->opp, ai->st.oppID && ai->st.opp,
         ai->st.opp ? ai->st.opp->cx : 0,
         ai->st.opp ? ai->st.opp->cy : 0,
         ai->st.ovx, ai->st.ovy, ai->st.odx,
-        ai->st.ody, now, &opp_lost, &opp_last_seen
+        ai->st.ody, now, &opp_lost, &opp_last_seen, &opp_last_heading
     );
 
     fill_agent(
@@ -76,7 +116,7 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
         ai->st.ball ? ai->st.ball->cx : 0,
         ai->st.ball ? ai->st.ball->cy : 0,
         ai->st.bvx, ai->st.bvy, ai->st.bdx,
-        ai->st.bdy, now, &ball_lost, &ball_last_seen
+        ai->st.bdy, now, &ball_lost, &ball_last_seen, NULL
     );
 
     // This is our model of the field

@@ -20,7 +20,7 @@ SkillStatus skill_goto(const World *w, Vec2 target, Motion *out) {
     // The angular velocity we want to enact to correct the error in angle
     double w_cmd = clampd(HEADING_TURN_GAIN * err_rad, -MAX_W_RADPS, MAX_W_RADPS);
     // Slowing factor for when we're near where we want to go to
-    double slow = dist < GOTO_SLOWDOWN_CM ? dist / GOTO_SLOWDOWN_CM : 1.0;\
+    double slow = dist < GOTO_SLOWDOWN_CM ? dist / GOTO_SLOWDOWN_CM : 1.0;
     // The linear velocity we want to enact this frame
     double v_cmd = GOTO_V_CMPS * slow * fmax(0.0, cos(err_rad));
     out->v = v_cmd;

@@ -36,13 +36,16 @@
 #define READY_FRAMES          5
 
 // **** staging / align / strike ****
-#define STAGE_TOL_CM          4.0  
-#define MOVE_TOL_CM           5.0  
-#define ALIGN_TOL_DEG         4.0  
-#define LAT_TOL_CM            2.0  
-#define ALIGN_STABLE_FRAMES   5    
-#define ALIGN_TIMEOUT_S       4.0  
-#define ABORT_TOL_DEG         20.0 
+#define STAGE_TOL_CM          4.0
+#define MOVE_TOL_CM           5.0
+#define ALIGN_TOL_DEG         4.0
+#define LAT_TOL_CM            2.0
+#define ALIGN_STABLE_FRAMES   5
+#define ALIGN_TIMEOUT_S       4.0
+#define GOTO_STAGING_TIMEOUT_S 8.0
+#define ALIGN_ATTEMPT_LIMIT   8
+
+#define ABORT_TOL_DEG         20.0
 #define STRIKE_TIMEOUT_S      3.0  
 #define STRIKE_V_CMPS         30.0 
 #define STRIKE_V_MIN_CMPS     8.0  
@@ -69,8 +72,17 @@
 #define MAX_W_RADPS           3.0 
 #define CLOSE_AHEAD_CM        20.0
 #define STAGE_DIST_CM         20.0
-#define STALL_EPS_CMPS        2.0 
-#define MIN_WALL_STAGE_CM     6.0 
+#define STALL_EPS_CMPS        2.0
+#define MIN_WALL_STAGE_CM     6.0
+// min speed to trust velocity for the per-frame
+// heading-sign disambiguation (in case it does 180);
+// below this (stationary/rotating in place) we
+// trust the last known-good heading instead
+#define HEADING_SIGN_TRUST_CMPS 5.0
+// implied speed above this in one frame looks
+// like a bad detection instead real motion.
+// We reject the reading instead of trusting it.
+#define MAX_PLAUSIBLE_SPEED_CMPS 150.0
                             
 
 #endif

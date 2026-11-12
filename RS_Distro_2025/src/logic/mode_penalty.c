@@ -2,20 +2,21 @@
  CSC C85 RoboSoccer Mode 1: Penalty shot
 ***************************************************/
 
+/***************************************************
+ Strictly logic. World in, Motion out, no BT_*, no struct RoboAI/blob, no
+ track_agents()/world_from_ai(). This is what makes it linkable (and
+ testable) without the image-capture/SDL/Bluetooth chain -- see
+ src/simulatte. mode_penalty_adapter.c is the other half: the real-world
+ wrapper that actually touches the robot.
+***************************************************/
+
 #include "mode_penalty.h"
-#include "../roboAI.h"
 #include "ai_config.h"
-#include "drive.h"
 #include "fsm.h"
 #include "geometry.h"
-#include "perception.h"
 #include "skills.h"
 #include "world.h"
-#include <sys/time.h>
-
-// Trust me bro
-extern int sx;
-extern int sy;
+#include <stdio.h>
 
 // **** multifaceted (shared) staging/aim plan, set by replan() and read by several states ****
 static Vec2 g_aim_target;
@@ -84,14 +85,21 @@ SkillStatus run_goto_staging(World *w, Motion *out) {
     return skill_goto(w, g_staging_point, out);
 }
 
+static int g_align_attempts = 0;
+
 int next_goto_staging(World *w, SkillStatus s, double t) {
-    (void)t;
     if (vec2_dist(w->ball.pos, g_ball_at_plan) > MOVE_TOL_CM) {
         replan(w);
         return P_GOTO_STAGING;
     }
-    if (s == SKILL_DONE)
+    if (s == SKILL_DONE) {
+        g_align_attempts++;
         return P_ALIGN;
+    }
+    if (t > GOTO_STAGING_TIMEOUT_S) {
+        g_align_attempts = 0;
+        return P_REPOSITION;
+    }
     return P_GOTO_STAGING;
 }
 
@@ -101,22 +109,37 @@ SkillStatus run_align(World *w, Motion *out) {
 }
 
 int next_align(World *w, SkillStatus s, double t) {
-    Vec2 dummy_aim;
-    Vec2 ideal = compute_staging(w, &dummy_aim);
-    if (vec2_dist(w->self.pos, ideal) > 1.5 * STAGE_TOL_CM) {
+    // Was: recompute the "ideal" staging point fresh every frame and compare
+    // it to self.pos (> 1.5*STAGE_TOL_CM -> replan). That compounds TWO
+    // independent noisy quantities (self-position noise AND the recomputed
+    // geometry's own sensitivity to ball-position noise), so it could stay
+    // just over threshold from noise alone with the ball never actually
+    // moving -- bouncing GOTO_STAGING<->ALIGN forever. Use the same,
+    // simpler, more robust criterion GOTO_STAGING itself uses: did the ball
+    // actually move, not "does self.pos look slightly off from a fresh
+    // recompute."
+    if (vec2_dist(w->ball.pos, g_ball_at_plan) > MOVE_TOL_CM) {
         replan(w);
         return P_GOTO_STAGING;
     }
     if (s == SKILL_DONE) {
         double lat = perp_dist_to_line(w->self.pos, w->ball.pos, g_aim_target);
-        if (lat < LAT_TOL_CM)
+        if (lat < LAT_TOL_CM) {
+            g_align_attempts = 0; // real progress
             return P_STRIKE;
+        }
         // Heading's stable but we drifted sideways of the aim line more than
         // plan_waypoint() should ever allow -- stay and let ALIGN_TIMEOUT_S
         // catch it if this somehow doesn't resolve itself.
     }
-    if (t > ALIGN_TIMEOUT_S)
+    // t_in_state resets every time we re-enter ALIGN, so ALIGN_TIMEOUT_S
+    // alone never accumulates across repeated short GOTO_STAGING<->ALIGN
+    // bounces -- that loop could otherwise run forever with no escape at
+    // all. g_align_attempts is the escape valve that survives the bounce.
+    if (t > ALIGN_TIMEOUT_S || g_align_attempts > ALIGN_ATTEMPT_LIMIT) {
+        g_align_attempts = 0;
         return P_REPOSITION;
+    }
     return P_ALIGN;
 }
 
@@ -233,7 +256,7 @@ int next_lost(World *w, SkillStatus s, double t) {
 
 static const StateDef g_penalty_states[] = {
     {P_READY, "P_READY", run_ready, next_ready, 0},
-    {P_GOTO_STAGING, "P_GOTO_STAGING", run_goto_staging, next_goto_staging, 0},
+    {P_GOTO_STAGING, "P_GOTO_STAGING", run_goto_staging, next_goto_staging, GOTO_STAGING_TIMEOUT_S},
     {P_ALIGN, "P_ALIGN", run_align, next_align, ALIGN_TIMEOUT_S},
     {P_STRIKE, "P_STRIKE", run_strike, next_strike, STRIKE_TIMEOUT_S},
     {P_FOLLOW_THROUGH, "P_FOLLOW_THROUGH", run_follow_through,
@@ -247,16 +270,18 @@ static const StateDef g_penalty_states[] = {
 #define N_PENALTY_STATES                                                       \
     (int)(sizeof(g_penalty_states) / sizeof(g_penalty_states[0]))
 
-// **** global pre-empts, checked before the state table every frame.
+// **** global preemptive moves, checked before the state table every frame.
 // Priority when more than one fires: wall_recover > unstick > lost > goal
-// detected (notes/fsm/README.md; no YIELD here, penalty has no opponent).
 int check_preempt(int state, const World *w, double now) {
-    if (state != P_WALL_RECOVER && state != P_FOLLOW_THROUGH && w->self.valid &&
-        near_wall(w->self.pos, w->field_min, w->field_max,
-                  DEFAULT_WALL_MARGIN_CM)) {
-        Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
-        if (vec2_dot(w->self.heading, in) < 0)
-            return P_WALL_RECOVER; // heading outward
+    if (state != P_WALL_RECOVER && state != P_FOLLOW_THROUGH && w->self.valid) {
+        double wall_margin = near_wall(w->ball.pos, w->field_min, w->field_max, DEFAULT_WALL_MARGIN_CM)
+                ? MIN_WALL_STAGE_CM
+                : DEFAULT_WALL_MARGIN_CM;
+        if (near_wall(w->self.pos, w->field_min, w->field_max, wall_margin)) {
+            Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
+            if (vec2_dot(w->self.heading, in) < 0)
+                return P_WALL_RECOVER; // heading outward
+        }
     }
 
     static double stall_t = 0, stall_last_now = -1;
@@ -290,35 +315,17 @@ int check_preempt(int state, const World *w, double now) {
     return -1;
 }
 
-// What's the gahdamn time
-double maintenant(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double) tv.tv_sec + (double) tv.tv_usec / 1e6;
-}
-
 static int prev_state = -1;
 static double t_entered = 0;
 
-void mode_penalty_step(struct RoboAI *ai, struct blob *blobs) {
-    // refresh ai->st.* for this frame (perception's input)
-    track_agents(ai, blobs);
-
-    World world;
-    double now = maintenant();
-    // Initialize the world from 
-    world_from_ai(ai, sx, sy, now, &world);
-
-    int state = ai->st.state;
-
-    int target = check_preempt(state, &world, now);
+int mode_penalty_fsm_step(World *world, int state, double now, Motion *out_motion) {
+    int target = check_preempt(state, world, now);
     if (target >= 0 && target != state) {
         fsm_log_transition(
             g_penalty_states, N_PENALTY_STATES,
             state, target, now, "pre-empt"
         );
         state = target;
-        ai->st.state = target;
     }
 
     if (state != prev_state) {
@@ -332,20 +339,19 @@ void mode_penalty_step(struct RoboAI *ai, struct blob *blobs) {
 
     const StateDef *row = fsm_find(g_penalty_states, N_PENALTY_STATES, state);
     if (!row) {
-        fprintf(stderr, "mode_penalty_step(): unknown state %d, holding\n",
+        fprintf(stderr, "mode_penalty_fsm_step(): unknown state %d, holding\n",
                 state);
-        drive_stop(1);
-        return;
+        out_motion->v = 0;
+        out_motion->w = 0;
+        return state;
     }
 
-    Motion motion = {0, 0};
-    SkillStatus s = row->run(&world, &motion);
-    drive_set(motion);
+    SkillStatus s = row->run(world, out_motion);
 
-    int next_id = row->next(&world, s, t_in_state);
+    int next_id = row->next(world, s, t_in_state);
     if (next_id != state) {
         fsm_log_transition(g_penalty_states, N_PENALTY_STATES, state, next_id,
                            now, "state");
-        ai->st.state = next_id;
     }
+    return next_id;
 }
