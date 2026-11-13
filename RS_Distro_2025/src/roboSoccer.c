@@ -88,21 +88,33 @@ int main(int argc, char **argv)
   if (argc<4||(atoi(argv[2])>1||atoi(argv[2])<0)||(atoi(argv[3])>2||atoi(argv[3])<0))
   {
    fprintf(stderr,"roboSoccer: Incorrect number of parameters.\n");
-   fprintf(stderr,"USAGE: roboSoccer video_device own_colour mode\n");
+   fprintf(stderr,"USAGE: roboSoccer video_device own_colour mode [colours_file]\n");
    fprintf(stderr,"  video_device - path to camera (typically /dev/video0 or /dev/video1)\n");
    fprintf(stderr,"  own_colour - colour of the EV3 bot controlled by this program, 0 = BLUE, 1 = RED\n");
    fprintf(stderr,"  mode - AI mode: 0 = SOCCER, 1 = PENALTY, 2 = CHASE\n");
+   fprintf(stderr,"  colours_file - optional: a saved colour calibration to use instead of colours.dat\n");
+   fprintf(stderr,"                 (keep several around for different lighting, e.g. colours_labroom.dat)\n");
    exit(0);
   }
 
+  const char *coloursCalFile = (argc>=5) ? argv[4] : NULL;
+
   //Connect to device
-  BT_open(HEXKEY);
+  // Set ROBOSOCCER_NO_BT=1 to skip the real connection attempt. This is useful
+  // for testing the camera/calibration without the robot connected or
+  // even powered on.
+  if (getenv("ROBOSOCCER_NO_BT")==NULL)
+   BT_open(HEXKEY);
+  else {
+   fprintf(stderr,"ROBOSOCCER_NO_BT set -- not connecting to any device, running vision-only.\n");
+   BT_open_offline();
+  }
 
   // Start GLUT
   glutInit(&argc, argv);
 
   // Launch imageCapture
-  if (imageCaptureStartup(argv[1], 1280, 720, atoi(argv[2]), atoi(argv[3]))) {
+  if (imageCaptureStartup(argv[1], 1280, 720, atoi(argv[2]), atoi(argv[3]), coloursCalFile)) {
     fprintf(stderr, "Couldn't start image capture, terminating...\n");
     exit(0);
   }

@@ -60,6 +60,17 @@ int BT_open(const char *device_id)
  return 0;
 }
 
+int BT_open_offline(void)
+{
+ socket_id=(int*)malloc(sizeof(int));
+ if (socket_id==NULL) return(-1);
+ *socket_id = socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM);
+ if (*socket_id<0) { free(socket_id); socket_id=NULL; return(-1); }
+ fcntl(*socket_id, F_SETFL, O_NONBLOCK);
+ fprintf(stderr,"BT_open_offline(): created an unconnected, non-blocking socket, not attempting to reach any device.\n");
+ return 0;
+}
+
 
 int BT_close()
 {

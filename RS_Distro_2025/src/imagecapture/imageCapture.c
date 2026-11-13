@@ -47,6 +47,7 @@
 #include "svdDynamic.h"
 #include "../roboAI.h"
 #include <time.h>
+#include <string.h>
 
 //#define __DEBUG
 #define MIN_BLOB_SIZE 500         // Minimum blob size allowed by blobDetect2()
@@ -81,6 +82,26 @@ int colourIdx;                        // Index for blob colour calibration
 double bgThresh=2500;			      // Background subtract threshold
 double colThresh=.5;			      // Saturation threshold
 double colAngThresh=.975;		      // Colour angle threshold
+
+// Camera auto-white-balance/auto-exposure/continuous-autofocus are all on
+// by default on most UVC webcams, and all three continuously re-interpret
+// the scene, which means the hue a pixel reports can drift between
+// when you ran colour calibration ('c') and whenever you're actually
+// playing, or even mid-match as the scene's content/brightness changes.
+// initCam() locks all three to fixed values below right after opening the
+// camera. THESE NUMBERS ARE PLACEHOLDERS. It is confirmed via v4l2-ctl that
+// locking works on this camera, but the actual values need to be tuned by
+// eye once it's mounted where it'll be used.
+int   camWBTempK     = 4500;  // V4L2_CID_WHITE_BALANCE_TEMPERATURE, Kelvin, range ~2800-6500
+int   camExposureTime = 300;  // V4L2_CID_EXPOSURE_ABSOLUTE, driver-specific units (100us steps)
+int   camFocusPos     = 10;   // V4L2_CID_FOCUS_ABSOLUTE, driver-specific units
+
+// Which colour-calibration file to load/save ('g'/'c'). Lets us keep
+// several named calibrations (colours_labroom.dat, colours_home.dat, ...)
+// for different lighting instead of recalibrating every session. Pass
+// the filename as roboSoccer's optional 5th argument; defaults to
+// colours.dat if not given.
+char coloursFile[256]="colours.dat";
 struct blob *blobs=NULL;		      // Blob list for the current frame * DO NOT USE THIS LIST *
 double *H = NULL;			          // Homography matrix for field rectification
 double *Hinv = NULL;                  // Inverse Homography matrix
@@ -102,11 +123,11 @@ int got_Y=0;				                    // Got Y adjustment
 /*********************************************************************
 Image processing setup and frame processing loop
 **********************************************************************/
-int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode)
+int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode, const char *coloursCalFile)
 {
  ///////////////////////////////////////////////////////////////////////////////////
  //
- // This is the entry point for the image processing code. It is called by 
+ // This is the entry point for the image processing code. It is called by
  // roboSoccer.c
  //
  // Input args:
@@ -114,6 +135,7 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode)
  //	- rx, ry: Requested image resolution, typically 720, 1280
  //	- own_col: Color of the bot controlled by this program (passed on from command line)
  //	- AI_mode: Penalties, Follow the Ball, or Robo-Soccer (passed on from command line)
+ //	- coloursCalFile: NULL for colours.dat, or a specific calibration file to use instead
  //
  // This function performs the following tasks:
  //  - Initializes the webcam and opens the video input device
@@ -130,6 +152,12 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode)
  toggleProc=0;
  AIMode=AI_mode;
  botCol=own_col;
+ if (coloursCalFile!=NULL && coloursCalFile[0]!=0)
+ {
+  strncpy(coloursFile,coloursCalFile,sizeof(coloursFile)-1);
+  coloursFile[sizeof(coloursFile)-1]=0;
+ }
+ fprintf(stderr,"Using colour calibration file: %s\n",coloursFile);
 
  fprintf(stderr,"Camera initialization!\n");
  // Initialize the webcam
@@ -240,7 +268,7 @@ void FrameGrabLoop(void)
    fprintf(stderr,"Recording colour value #%d at %f,%f has RGB=%f,%f,%f, hue=%f\n",colourIdx,mcx,mcy,R,G,B,Hu);
    if (colourIdx==4) 
    {
-     f=fopen("colours.dat","w");
+     f=fopen(coloursFile,"w");
      fwrite(&Mhues[0],4*sizeof(double),1,f);
      fwrite(&Mrgb[0][0],4*3*sizeof(double),1,f);
      fwrite(&bgThresh,sizeof(double),1,f);
@@ -1634,11 +1662,13 @@ void initGlut(char* winName)
 
  // Set video mode: double-buffered, color, depth-buffered
  glutInitDisplayMode (GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+ fprintf(stderr,"GLUT_DISPLAY_MODE_POSSIBLE=%d (0 means the requested display mode, double-buffered/RGB/depth, isn't available on this display, which would explain a window that never appears)\n",glutGet(GLUT_DISPLAY_MODE_POSSIBLE));
 
  // Create window
  glutInitWindowPosition (0, 0);
  glutInitWindowSize(Win[0],Win[1]);
  windowID = glutCreateWindow(winName);
+ fprintf(stderr,"glutCreateWindow() returned windowID=%d (0 or negative means it failed)\n",windowID);
 
  // Setup callback functions to handle window-related events.
  // In particular, OpenGL has to be informed of which functions
@@ -1771,7 +1801,7 @@ void kbHandler(unsigned char key, int x, int y)
   }
   else fprintf(stderr,"No offset calibration data, please capture robot height offsets (use 'z')\n");
   
-  f=fopen("colours.dat","r");
+  f=fopen(coloursFile,"r");
   if (f!=NULL)
   {
     fread(&Mhues[0],4*sizeof(double),1,f);
@@ -1836,7 +1866,7 @@ void kbHandler(unsigned char key, int x, int y)
  if (mod==1)
  {
   // Cache updated thresholds
-  f=fopen("colours.dat","w");
+  f=fopen(coloursFile,"w");
   fwrite(&Mhues[0],4*sizeof(double),1,f);
   fwrite(&Mrgb[0][0],4*3*sizeof(double),1,f);
   fwrite(&bgThresh,sizeof(double),1,f);
@@ -1948,7 +1978,7 @@ struct vdIn *initCam(const char *videodevice, int width, int height)
 	unsigned char *p = NULL;
 	int hwaccel = 1;
 	const char *mode = NULL;
-	int format = V4L2_PIX_FMT_YUYV;
+	int format = V4L2_PIX_FMT_MJPEG; // Was V4L2_PIX_FMT_YUYV
     int i;					
 	int grabmethod = 1;
 	int fps = 30;
@@ -1973,6 +2003,18 @@ struct vdIn *initCam(const char *videodevice, int width, int height)
 			(videoIn, (char *) videodevice, width, height, fps, format,
 			 grabmethod, &avifilename[0]) < 0)
 		return(NULL);
+
+	// Lock auto-white-balance/auto-exposure/continuous-autofocus to fixed
+	// values. Not every camera supports every one of these controls.
+  // v4l2SetControl already no-ops safely via isv4l2Control() when a
+  // control doesn't exist, so this is safe to call unconditionally.
+	v4l2SetControl(videoIn, V4L2_CID_AUTO_WHITE_BALANCE, 0);
+	v4l2SetControl(videoIn, V4L2_CID_WHITE_BALANCE_TEMPERATURE, camWBTempK);
+	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_AUTO, 1); // "Manual Mode"
+	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_ABSOLUTE, camExposureTime);
+	v4l2SetControl(videoIn, V4L2_CID_FOCUS_AUTO, 0);
+	v4l2SetControl(videoIn, V4L2_CID_FOCUS_ABSOLUTE, camFocusPos);
+
 	return(videoIn);		// Successfully opened a video device
 }
 

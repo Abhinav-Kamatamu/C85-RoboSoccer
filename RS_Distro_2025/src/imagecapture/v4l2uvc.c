@@ -670,15 +670,16 @@ static int isv4l2Control(struct vdIn *vd, int control,
 int err =0;
     queryctrl->id = control;
     if ((err= ioctl(vd->fd, VIDIOC_QUERYCTRL, queryctrl)) < 0) {
-	perror("ioctl querycontrol error");
+		perror("ioctl querycontrol error");
     } else if (queryctrl->flags & V4L2_CTRL_FLAG_DISABLED) {
-	printf("control %s disabled\n", (char *) queryctrl->name);
-    } else if (queryctrl->flags & V4L2_CTRL_TYPE_BOOLEAN) {
-	return 1;
-    } else if (queryctrl->type & V4L2_CTRL_TYPE_INTEGER) {
-	return 0;
+		printf("control %s disabled\n", (char *) queryctrl->name);
+    } else if (queryctrl->type == V4L2_CTRL_TYPE_BOOLEAN) {
+		return 1;
+    } else if (queryctrl->type == V4L2_CTRL_TYPE_INTEGER ||
+               queryctrl->type == V4L2_CTRL_TYPE_MENU) {
+		return 0;
     } else {
-	printf("contol %s unsupported\n", (char *) queryctrl->name);
+		printf("contol %s unsupported\n", (char *) queryctrl->name);
     }
     return -1;
 }

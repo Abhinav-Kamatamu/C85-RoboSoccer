@@ -88,7 +88,10 @@ struct displayList{
 };
 
 // Startup
-int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int ai_mode);
+// coloursCalFile: NULL for the default (colours.dat), or a path to a
+// specific saved calibration to load/save instead (see coloursFile in
+// imageCapture.c).
+int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int ai_mode, const char *coloursCalFile);
 
 // OpenGL, GLUT, and main loop
 void initGlut(char* winName);

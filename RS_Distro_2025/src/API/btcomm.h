@@ -115,6 +115,17 @@ extern int message_id_counter;		// <-- Global message id counter
 
 // Set up a socket to communicate with your Lego EV3 kit
 int BT_open(const char *device_id);
+// Creates a real but UNCONNECTED socket, without attempting to reach any
+// device, for running without the robot connected (e.g. testing the
+// camera/vision pipeline alone). Every BT_* function dereferences the
+// shared socket_id with no NULL check anywhere in this file, so skipping
+// BT_open() entirely leaves it NULL and crashes the instant anything
+// calls a BT_* function.
+// This keeps socket_id non-NULL so write()/read() on it fail normally
+// (ENOTCONN) and each function's own existing reply-byte error handling
+// takes over instead of segfaulting. Returns 0 on success, -1 on failure
+// (same convention as BT_open()).
+int BT_open_offline(void);
 
 // Close open socket to your EV3 ending the communication with the bot
 int BT_close();
