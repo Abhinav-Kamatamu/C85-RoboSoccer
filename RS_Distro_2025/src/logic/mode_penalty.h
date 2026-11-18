@@ -33,4 +33,11 @@ void mode_penalty_step(struct RoboAI *ai, struct blob *blobs);
 // Step the FSM
 int mode_penalty_fsm_step(World *world, int state, double now, Motion *out_motion);
 
+// Debug-only accessors for replan()'s current plan for logging what the
+// robot is actually driving toward/douing each frame. Valid any time state is
+// P_GOTO_STAGING/P_ALIGN/P_STRIKE/P_FOLLOW_THROUGH (i.e. after the first
+// replan()). It's {0,0} before that.
+Vec2 mode_penalty_debug_staging(void);
+Vec2 mode_penalty_debug_aim(void);
+
 #endif

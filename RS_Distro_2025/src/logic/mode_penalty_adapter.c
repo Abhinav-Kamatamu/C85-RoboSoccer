@@ -1,27 +1,17 @@
 /***************************************************
- CSC C85 RoboSoccer - Mode 1 real-world adapter
-
- mode_penalty.c is pure logic (World in, Motion out, no I/O) specifically
- so it can be linked and tested without the image-capture/SDL/Bluetooth
- chain (good for simulatte). This tiny file is the other half. it's the
- only place in mode 1 that touches struct RoboAI/blob, track_agents(),
- and drive_set().
+ CSC C85 RoboSoccer; Mode 1 adapter
 ***************************************************/
 
 #include "mode_penalty.h"
 #include "../roboAI.h"
 #include "drive.h"
 #include "perception.h"
-#include <sys/time.h>
+#include "clock.h"
 
 extern int sx;
 extern int sy;
-
-static double maintenant(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (double)tv.tv_sec + (double)tv.tv_usec / 1e6;
-}
+extern int botCol;
+extern int AIMode;
 
 void mode_penalty_step(struct RoboAI *ai, struct blob *blobs) {
     // refresh ai->st.* for this frame (perception's input)
@@ -33,6 +23,9 @@ void mode_penalty_step(struct RoboAI *ai, struct blob *blobs) {
 
     Motion motion = {0, 0};
     int next_id = mode_penalty_fsm_step(&world, ai->st.state, now, &motion);
-    drive_set(motion);
+    WORLD_LOG_FRAME(ai, botCol, AIMode, ai->st.state, &world, motion,
+                     mode_penalty_debug_staging(), mode_penalty_debug_aim());
+    perception_set_last_cmd_v(motion.v);
+    drive_set(motion, drive_get_regulated_speed());
     ai->st.state = next_id;
 }

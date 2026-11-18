@@ -23,6 +23,15 @@ double rad_to_deg(double r);
 double deg_to_rad(double d);
 
 // Clamp a point to stay at least `margin` inside [field_min, field_max].
+// If the straight segment from->to passes within block_cm of obstacle (and
+// the obstacle is actually between the two points), return a waypoint that
+// goes clear_cm to the side of the obstacle (the side with more room
+// inside the field); otherwise return `to` unchanged. Used so driving to a
+// staging point behind the ball doesn't go through the ball on the way.
+Vec2 plan_avoid_point(Vec2 from, Vec2 to, Vec2 obstacle, double block_cm,
+                      double clear_cm, Vec2 field_min, Vec2 field_max);
+
+// Clamb vectors to be inside the field within a certain margin                      
 Vec2 clamp_to_field(Vec2 p, Vec2 field_min, Vec2 field_max, double margin);
 
 // Plan a staging point, a point `stage_dist` cm behind the ball on the line from
@@ -33,11 +42,8 @@ Vec2 plan_waypoint(Vec2 ball_pos, Vec2 aim_target, double stage_dist,
 // True if `pos` is within `margin` of any field edge.
 int near_wall(Vec2 pos, Vec2 field_min, Vec2 field_max, double margin);
 
-// Which of the 4 walls is closest to `pos`, and which direction to drive
-// to get away from it. A unit vector pointing from that wall back into
-// the field (e.g. near the left wall -> (1,0), drive in +x). In a corner,
-// this picks whichever single wall is minutely closer, NOT a diagonal
-// blend of both.
+// Finds whichever of the 4 walls pos is closest to, and returns the unit
+// vector pointing away from that wall, back toward the field's interior.
 Vec2 direction_away_from_nearest_wall(Vec2 pos, Vec2 field_min, Vec2 field_max);
 
 // Distance from `pos` to whichever of the 4 walls is nearest.
@@ -53,8 +59,14 @@ Vec2 plan_wall_push_staging(Vec2 ball_pos, Vec2 field_min, Vec2 field_max,
                              Vec2 *aim_target_out);
 
 // True if `ball_pos` is past `goal_x` (in the direction away from
-// `field_center_x`) and within `goal_width`/2 of `goal_y`.
-int ball_in_goal(Vec2 ball_pos, Vec2 goal, double goal_width, double field_center_x);
+// `field_center_x`) and within `goal_width`/2 of `goal_y`. "Past" is
+// evaluated against the ball's center reach (goal_x -+ ball_radius), instead of
+// goal_x itself. The ball's leading edge is what actually crosses the
+// line, and its center physically cannot reach goal_x before the edge
+// does. Pass in 0 for ball_radius for a "literal" center-crossing test,
+// but you probably never will
+int ball_in_goal(Vec2 ball_pos, Vec2 goal, double goal_width, double field_center_x,
+                  double ball_radius);
 
 // Perpendicular distance from `p` to the infinite line through `a` and `b`.
 double perp_dist_to_line(Vec2 p, Vec2 a, Vec2 b);
@@ -62,8 +74,17 @@ double perp_dist_to_line(Vec2 p, Vec2 a, Vec2 b);
 // Per-frame fix for the blob-shape heading vector's 180deg switching. it's
 // the long axis of a rectangle, which can't tell front from back, and can
 // flip sign on any given frame.
-// id_bot() corrects this ONCE at startup by comparing against the motion
+// id_bot() corrects this once at startup by comparing against the motion
 // vector, but that correction doesn't persist.
-Vec2 fix_heading_sign(Vec2 raw, Vec2 vel, double trust_speed_cmps, Vec2 *last_good);
+//
+// raw is resolved against *last_good first (whichever of raw/-raw is
+// closer to the already-committed direction), so a fleeting one-time flip in raw
+// itself can never show up in the output. Actually changing the
+// committed direction requires HEADING_FLIP_CONFIRM_FRAMES consecutive
+// frames of vel disagreeing with it. A single frame's vel, which comes from from
+// one ~30ms position delta, isn't reliable enough in DIRECTION to trust
+// immediately even when its magnitude passes trust_speed_cmps
+Vec2 fix_heading_sign(Vec2 raw, Vec2 vel, double trust_speed_cmps, Vec2 *last_good,
+                       int *flip_streak, int confirm_frames);
 
 #endif

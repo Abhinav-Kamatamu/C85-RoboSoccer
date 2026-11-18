@@ -37,10 +37,14 @@
 #include "dynctrl-logitech.h"
 
 
-#define NB_BUFFER 1		// <-- Mind this! this creates the buffering and was set to 4
+// V4L2 capture buffers. MUST be >= 2! With a single buffer the driver has
+// nowhere to put the next frame while we are still decoding/processing the
+// current one, so it ACTUALLY DROPS it. Originally, NB_BUFFER 1 -> 16.6 fps with
+// 44% of the camera's frames dropped; NB_BUFFER 2-4 -> 29.5 fps, 0 dropped,
+// even with 28 ms of extra time. Kept small so a potential camera stall can only
+// queue up (NB_BUFFER-1) stale frames, so we act on only the most recent parts.
+#define NB_BUFFER 3
 #define DHT_SIZE 432
-
-
 
 struct vdIn {
     int fd;

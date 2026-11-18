@@ -68,22 +68,25 @@
 
 #include "imagecapture/imageCapture.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <GL/glut.h>
 #include "roboAI.h"
 #include "API/btcomm.h"
 
+// Replace your robot's hex identifier here so the code can talk to it.
 #ifndef HEXKEY
 	#define HEXKEY "00:16:53:56:55:D9"
 #endif
 
-
-// Replace your robot's hex identifier here so the code can talk to it.
-#ifndef HEXKEY
-	#define HEXKEY "00:16:53:3F:00:00"
-#endif
-
 int main(int argc, char **argv)
 {
+  // Activate OpenMP so that we can have faster processing
+  if (getenv("OMP_WAIT_POLICY") == NULL) {
+    setenv("OMP_WAIT_POLICY", "PASSIVE", 1);
+    execvp(argv[0], argv);
+    perror("roboSoccer: re-exec for OMP_WAIT_POLICY failed, continuing anyway");
+  }
 
   if (argc<4||(atoi(argv[2])>1||atoi(argv[2])<0)||(atoi(argv[3])>2||atoi(argv[3])<0))
   {

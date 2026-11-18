@@ -112,7 +112,8 @@ am_roboSoccer_OBJECTS = roboSoccer.$(OBJEXT) \
 	logic/skills.$(OBJEXT) logic/drive.$(OBJEXT) \
 	logic/fsm.$(OBJEXT) logic/perception.$(OBJEXT) \
 	logic/mode_penalty.$(OBJEXT) \
-	logic/mode_penalty_adapter.$(OBJEXT) logic/gyro.$(OBJEXT)
+	logic/mode_penalty_adapter.$(OBJEXT) logic/gyro.$(OBJEXT) \
+	logic/mode_chase.$(OBJEXT) logic/mode_chase_adapter.$(OBJEXT)
 roboSoccer_OBJECTS = $(am_roboSoccer_OBJECTS)
 roboSoccer_LDADD = $(LDADD)
 AM_V_P = $(am__v_P_@AM_V@)
@@ -139,7 +140,9 @@ am__depfiles_remade = ./$(DEPDIR)/roboAI.Po ./$(DEPDIR)/roboSoccer.Po \
 	imagecapture/$(DEPDIR)/utils.Po \
 	imagecapture/$(DEPDIR)/v4l2uvc.Po logic/$(DEPDIR)/drive.Po \
 	logic/$(DEPDIR)/fsm.Po logic/$(DEPDIR)/geometry.Po \
-	logic/$(DEPDIR)/gyro.Po logic/$(DEPDIR)/mode_penalty.Po \
+	logic/$(DEPDIR)/gyro.Po logic/$(DEPDIR)/mode_chase.Po \
+	logic/$(DEPDIR)/mode_chase_adapter.Po \
+	logic/$(DEPDIR)/mode_penalty.Po \
 	logic/$(DEPDIR)/mode_penalty_adapter.Po \
 	logic/$(DEPDIR)/perception.Po logic/$(DEPDIR)/skills.Po
 am__mv = mv -f
@@ -283,9 +286,17 @@ top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avilib.c imagecapture/color.c imagecapture/gui.c imagecapture/imageProc.c imagecapture/svdDynamic.c imagecapture/utils.c imagecapture/v4l2uvc.c \
 			API/btcomm.c roboAI.c \
-			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c logic/mode_penalty_adapter.c logic/gyro.c
+			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c logic/mode_penalty_adapter.c logic/gyro.c \
+			logic/mode_chase.c logic/mode_chase_adapter.c
 
 AM_CPPFLAGS = -fpermissive
+# OpenMP: the vision code (fieldUnwarp2, bgSubtract3, display copy, imageProc)
+# is full of "#pragma omp parallel for". Without -fopenmp those are
+# IGNORED!!!!! and the whole pipeline runs on A SINGULAR thread (Insert Barfing
+# emoji cuz EWWWWWWWWWW). AM_CFLAGS is used for both
+# compiling and linking here, so this also ropes in libgomp. The same flag is
+# in compile_standalone.sh.
+AM_CFLAGS = -fopenmp
 all: all-am
 
 .SUFFIXES:
@@ -413,6 +424,10 @@ logic/mode_penalty_adapter.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
 logic/gyro.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_chase.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_chase_adapter.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
 
 roboSoccer$(EXEEXT): $(roboSoccer_OBJECTS) $(roboSoccer_DEPENDENCIES) $(EXTRA_roboSoccer_DEPENDENCIES) 
 	@rm -f roboSoccer$(EXEEXT)
@@ -442,6 +457,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/fsm.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/geometry.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/gyro.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_chase.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_chase_adapter.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_penalty.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_penalty_adapter.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/perception.Po@am__quote@ # am--include-marker
@@ -616,6 +633,8 @@ distclean: distclean-am
 	-rm -f logic/$(DEPDIR)/fsm.Po
 	-rm -f logic/$(DEPDIR)/geometry.Po
 	-rm -f logic/$(DEPDIR)/gyro.Po
+	-rm -f logic/$(DEPDIR)/mode_chase.Po
+	-rm -f logic/$(DEPDIR)/mode_chase_adapter.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po
@@ -680,6 +699,8 @@ maintainer-clean: maintainer-clean-am
 	-rm -f logic/$(DEPDIR)/fsm.Po
 	-rm -f logic/$(DEPDIR)/geometry.Po
 	-rm -f logic/$(DEPDIR)/gyro.Po
+	-rm -f logic/$(DEPDIR)/mode_chase.Po
+	-rm -f logic/$(DEPDIR)/mode_chase_adapter.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po

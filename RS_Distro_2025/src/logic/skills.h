@@ -21,8 +21,15 @@
 // clamp function for doubles
 double clampd(double v, double lo, double hi);
 
-// Drive toward `target`. DONE once within STAGE_TOL_CM.
-SkillStatus skill_goto(const World *w, Vec2 target, Motion *out);
+// Drive toward `target`. DONE once within STAGE_TOL_CM. resetting (pass the
+// g_entered/first-frame flag) clears the antipodal turn-direction
+// commitment.
+SkillStatus skill_goto(const World *w, Vec2 target, int reset, Motion *out);
+
+// Drive at `target` and keep going, with no slowdown approaching
+// it. For continuously chasing/pushing something, as opposed to
+// skill_goto's arrive-and-stop.
+SkillStatus skill_chase(const World *w, Vec2 target, Motion *out);
 
 // Skill to face towards target
 SkillStatus skill_face(const World *w, Vec2 target, int reset, Motion *out);
@@ -44,7 +51,7 @@ SkillStatus skill_backoff(const World *w, double dist_cm, int reset, Motion *out
 SkillStatus skill_hold(const World *w, Motion *out);
 
 // Drive away from the nearest wall. DONE once clear of DEFAULT_WALL_MARGIN_CM.
-SkillStatus skill_leave_wall(const World *w, Motion *out);
+SkillStatus skill_leave_wall(const World *w, Motion *out, int reset);
 
 // Wiggle free. reverse briefly, then turn briefly, repeat. Always RUNNING
 // the caller's `next()` checks World.self.vel to decide we're free.

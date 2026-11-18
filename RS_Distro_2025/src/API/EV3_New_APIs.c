@@ -694,9 +694,8 @@ int BT_motor_program_stop(void)
  *      Robot configuration used by Parts 2 to 4                                       (from EV3_Localization.h)
  *
  *********************************************************************************************************************/
-
 #ifndef HEXKEY
-	#define HEXKEY "00:16:53:56:4c:53"	// <--- SET UP YOUR EV3's HEX ID here
+	#define HEXKEY "00:16:53:56:55:D9"
 #endif
 
 #define DRIVE_WHEELS    (MOTOR_A | MOTOR_D)  // Left wheel on port A, right wheel on port D

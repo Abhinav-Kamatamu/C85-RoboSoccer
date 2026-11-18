@@ -183,4 +183,9 @@ int BT_set_LED_colour(int colour);
 int BT_draw_image_from_file(int colour, int x_0, int y_0, const char *file_path);
 int BT_restore_previous_display(int no);
 int BT_store_current_display(int no);
+
+int BT_turn_speed(char lport, char lspeed, char rport, char rspeed); // Same as BT_turn, but regulated speed. Immune to battery drift
+int BT_read_battery_voltage(double *volts);	// Battery voltage in volts (read the brick)
+int BT_read_battery_pct(int *pct); // Battery level 0-100, same quantity the brick's screen shows
+
 #endif

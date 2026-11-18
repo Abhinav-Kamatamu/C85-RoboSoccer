@@ -25,6 +25,7 @@
 
 #include "v4l2uvc.h"
 #include "utils.h"
+#include "../logic/clock.h"
 
 #define ARRAY_SIZE(a)		(sizeof(a) / sizeof((a)[0]))
 #define FOURCC_FORMAT		"%c%c%c%c"
@@ -530,10 +531,17 @@ static int video_disable(struct vdIn *vd)
 }
 
 
-int uvcGrab(struct vdIn *vd)
-{
-#define HEADERFRAME1 0xaf
+/* Diagnostics for the 'f' FPS readout in imageCapture.c  */
+double g_dbg_dqbuf_ms = 0, g_dbg_decode_ms = 0;   /* last frame */
+unsigned g_dbg_seq_gap_total = 0;                  /* frames the driver dropped */
+double g_dbg_kernel_dt_ms = 0;                     /* kernel timestamp spacing, last frame */
+
+int uvcGrab(struct vdIn *vd) {
+	#define HEADERFRAME1 0xaf
     int ret;
+	/* declared up here: the gotos below must not cross an initialization (C++ build) */
+    double dbg_t0;
+    double kts; /* assigned below; an initializer here would be jumped over by the gotos (C++ build) */
 
     if (!vd->isstreaming)
 	if (video_enable(vd))
@@ -541,11 +549,34 @@ int uvcGrab(struct vdIn *vd)
     memset(&vd->buf, 0, sizeof(struct v4l2_buffer));
     vd->buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     vd->buf.memory = V4L2_MEMORY_MMAP;
+    dbg_t0 = maintenant() * 1e3;
     ret = ioctl(vd->fd, VIDIOC_DQBUF, &vd->buf);
     if (ret < 0) {
-	perror("Unable to dequeue buffer");
-	goto err;
+		perror("Unable to dequeue buffer");
+		goto err;
     }
+
+    g_dbg_dqbuf_ms = maintenant() * 1e3 - dbg_t0;
+
+	// Actually getting 30 fps was a MASSIVE headache!!!
+	// A frame-drop/pacing check using the driver's own numbers for this
+	// frame (sequence count + capture timestamp), insead of our clock,
+	// so it stays true irrespective of how fast/slow our own processing
+	// loop is. A gap in vd->buf.sequence means that the driver captured and
+	// dropped frame(s) before we dequeued them. The timestamp delta
+	// is the real time between frames as the camera captured them. Both
+	// are used for the printFPS debug line
+	static unsigned last_seq = 0;
+	static double last_kts = -1;
+	static int have_seq = 0;
+	kts = vd->buf.timestamp.tv_sec * 1e3 + vd->buf.timestamp.tv_usec / 1e3;
+	if (have_seq && vd->buf.sequence > last_seq + 1)
+	    g_dbg_seq_gap_total += vd->buf.sequence - last_seq - 1; // dropped frame
+	if (last_kts >= 0)
+	    g_dbg_kernel_dt_ms = kts - last_kts; // difference in kernel timestamps
+	last_seq = vd->buf.sequence;
+	last_kts = kts;
+	have_seq = 1;
 
 	/* Capture a single raw frame */
 	if (vd->rawFrameCapture && vd->buf.bytesused > 0) {
@@ -610,15 +641,19 @@ end_capture:
         if(vd->buf.bytesused <= HEADERFRAME1) {	/* Prevent crash on empty image */
 /*	    if(debug)*/
 	        printf("Ignoring empty buffer ...\n");
-	    return 0;
+	    	return 0;
         }
-	memcpy(vd->tmpbuffer, vd->mem[vd->buf.index],vd->buf.bytesused);
-	 /* avi recording is toggled on */
-	if (jpeg_decode(&vd->framebuffer, vd->tmpbuffer, &vd->width,
-	     &vd->height) < 0) {
-	    printf("jpeg decode errors\n");
-	    goto err;
-	}
+
+	    {   /* own scope: a declaration with an initializer may not be jumped over by case/goto (C++ build) */
+	    double dbg_d0 = maintenant() * 1e3;
+	    memcpy(vd->tmpbuffer, vd->mem[vd->buf.index],vd->buf.bytesused);
+	    /* avi recording is on */
+	    if (jpeg_decode(&vd->framebuffer, vd->tmpbuffer, &vd->width, &vd->height) < 0) {
+			printf("jpeg decode errors\n");
+			goto err;
+	    }
+	    g_dbg_decode_ms = maintenant() * 1e3 - dbg_d0;
+	    }
 
 	if (debug)
 	    printf("bytes in used %d\n", vd->buf.bytesused);

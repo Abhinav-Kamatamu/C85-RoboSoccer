@@ -3,12 +3,18 @@
 #include "ai_config.h"
 #include "geometry.h"
 #include "gyro.h"
+#include "drive.h"
 #include <math.h>
+#include <stdio.h>
+
+static double g_last_cmd_v = 0;
+void perception_set_last_cmd_v(double v) { g_last_cmd_v = v; }
 
 void fill_agent(
     Agent *a, int seen, double cx, double cy, double vx_px,
     double vy_px, double dx, double dy, double now, int *lost_counter,
-    double *last_seen_t, Vec2 *last_good_heading
+    double *last_seen_t, Vec2 *last_good_heading, int *heading_flip_streak,
+    double heading_vel_scale
 ) {
     if (seen && *last_seen_t >= 0) {
         double dt_check = now - *last_seen_t;
@@ -42,7 +48,12 @@ void fill_agent(
         a->vel.y = (vy_px / PX_PER_CM_Y) / dt;
         if (last_good_heading) {
             Vec2 raw = {dx, dy};
-            a->heading = fix_heading_sign(raw, a->vel, HEADING_SIGN_TRUST_CMPS, last_good_heading);
+            // heading_vel_scale => +1 trust vel as-is, -1 we are reversing (vel
+            // should be OPPOSITE heading), 0 don't trust vel at all.
+            Vec2 vel_for_heading = vec2_scale(a->vel, heading_vel_scale);
+            a->heading = fix_heading_sign(raw, vel_for_heading, HEADING_SIGN_TRUST_CMPS,
+                                           last_good_heading, heading_flip_streak,
+                                           HEADING_FLIP_CONFIRM_FRAMES);
         } else {
             a->heading.x = 0;
             a->heading.y = 0;
@@ -59,12 +70,7 @@ void fill_agent(
         a->vel.x = 0;
         a->vel.y = 0;
         // Persist the last known heading through a dropout instead of
-        // zeroing it. atan2(0,0) silently returns 0 (due-+x), which is a
-        // worse answer than "whatever we last knew" for the handful of
-        // frames before lost_frames crosses LOST_FRAMES and the FSM gives
-        // up on this agent entirely -- until then it's still actively
-        // steering off this heading. No last_good_heading (the ball) ->
-        // still zero, matches world.h's documented "don't need it".
+        // zeroing it.
         a->heading = last_good_heading ? *last_good_heading : (Vec2){0, 0};
     }
 }
@@ -73,6 +79,7 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
     static int self_lost = 0, opp_lost = 0, ball_lost = 0;
     static double self_last_seen = -1, opp_last_seen = -1, ball_last_seen = -1;
     static Vec2 self_last_heading = {0, 0}, opp_last_heading = {0, 0};
+    static int self_flip_streak = 0, opp_flip_streak = 0;
     static double self_last_tick = -1;
     (void)sx;
     (void)sy;
@@ -89,7 +96,9 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
         ai->st.self ? ai->st.self->cx : 0,
         ai->st.self ? ai->st.self->cy : 0,
         ai->st.svx, ai->st.svy, ai->st.sdx,
-        ai->st.sdy, now, &self_lost, &self_last_seen, &self_last_heading
+        ai->st.sdy, now, &self_lost, &self_last_seen, &self_last_heading,
+        &self_flip_streak,
+        (fabs(g_last_cmd_v) >= HEADING_CMD_V_MIN_CMPS) ? (g_last_cmd_v > 0 ? 1.0 : -1.0) : 0.0
     );
 
     if (!self_seen && tick_dt > 0) {
@@ -100,6 +109,7 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
             // TODO: compare with actual angle reading
             out->self.heading = (Vec2){cos(ang), sin(ang)};
             self_last_heading = out->self.heading; // keep fix_heading_sign's prior in sync
+            self_flip_streak = 0; // streak was counted against the now-stale prior
         }
     }
 
@@ -108,7 +118,8 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
         ai->st.opp ? ai->st.opp->cx : 0,
         ai->st.opp ? ai->st.opp->cy : 0,
         ai->st.ovx, ai->st.ovy, ai->st.odx,
-        ai->st.ody, now, &opp_lost, &opp_last_seen, &opp_last_heading
+        ai->st.ody, now, &opp_lost, &opp_last_seen, &opp_last_heading,
+        &opp_flip_streak, 1.0
     );
 
     fill_agent(
@@ -116,15 +127,10 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
         ai->st.ball ? ai->st.ball->cx : 0,
         ai->st.ball ? ai->st.ball->cy : 0,
         ai->st.bvx, ai->st.bvy, ai->st.bdx,
-        ai->st.bdy, now, &ball_lost, &ball_last_seen, NULL
+        ai->st.bdy, now, &ball_lost, &ball_last_seen, NULL, NULL, 1.0
     );
 
     // This is our model of the field
-    // TODO: load from field.cfg
-    // These are the defaults from ai_config.h until that loader exists.
-    // We currently assume a rectangular grid but we should probably shift to
-    // just using pure polygons to represent the field as the corners and the
-    // goal can be curved
     out->field_min.x = 0;
     out->field_min.y = 0;
     out->field_max.x = DEFAULT_FIELD_W_CM;
@@ -143,4 +149,71 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out) {
         out->own_goal.x = DEFAULT_FIELD_W_CM;
         out->their_goal.x = 0;
     }
+}
+
+// Raw blob data (shape-axis direction dx/dy, motion-vector
+// direction mx/my, pixel position/size/bbox/colour) for one agent, raw
+// relative to fix_heading_sign(), which is what turns dx/dy into World's
+// heading. "null" if this agent has no current blob (not seen this frame).
+void fprint_blob(FILE *f, const char *tag, struct blob *b) {
+    if (b) {
+        fprintf(f,
+            "%s[cx=%.1f cy=%.1f dx=%.3f dy=%.3f mx=%.3f my=%.3f size=%d "
+            "bbox=(%d,%d,%d,%d) HSV=(%.1f,%.3f,%.3f)] ",
+            tag, b->cx, b->cy, b->dx, b->dy, b->mx, b->my, b->size,
+            b->x1, b->y1, b->x2, b->y2, b->H, b->S, b->V);
+    } else {
+        fprintf(f, "%s[null] ", tag);
+    }
+}
+
+void world_log_frame(struct RoboAI *ai, int own_col, int ai_mode, int state,
+                      const World *w, Motion motion, Vec2 staging, Vec2 aim) {
+    static FILE *f = NULL;
+    static int opened = 0;
+    if (!opened) {
+        opened = 1;
+        char fname[64];
+        snprintf(fname, sizeof(fname), "positions_%d_%d.log", own_col, ai_mode);
+        f = fopen(fname, "w");
+        if (!f) {
+            fprintf(stderr, "world_log_frame(): could not open %s for writing\n", fname);
+            return;
+        }
+        fprintf(stderr, "Logging per-frame object positions to %s\n", fname);
+    }
+    if (!f) return;
+
+    // Wheel powers actually sent for the previous frame (this frame's are not
+    // decided until drive_set(), which runs right after this call).
+    double sent_l, sent_r;
+    drive_get_last_power(&sent_l, &sent_r);
+
+    fprintf(f,
+        "t=%.3f state=%d "
+        "self[valid=%d lost=%d pos=(%.2f,%.2f) vel=(%.2f,%.2f) heading=(%.3f,%.3f)] "
+        "opp[valid=%d lost=%d pos=(%.2f,%.2f) vel=(%.2f,%.2f) heading=(%.3f,%.3f)] "
+        "ball[valid=%d lost=%d pos=(%.2f,%.2f) vel=(%.2f,%.2f) heading=(%.3f,%.3f)] "
+        "raw_self[sdx=%.3f sdy=%.3f smx=%.3f smy=%.3f] "
+        "raw_opp[odx=%.3f ody=%.3f omx=%.3f omy=%.3f] "
+        "raw_ball[bdx=%.3f bdy=%.3f bmx=%.3f bmy=%.3f] "
+        "motion[v=%.2f w=%.3f] plan[staging=(%.2f,%.2f) aim=(%.2f,%.2f)] sent[prev_l=%.0f prev_r=%.0f] ",
+        w->now, state,
+        w->self.valid, w->self.lost_frames, w->self.pos.x, w->self.pos.y,
+        w->self.vel.x, w->self.vel.y, w->self.heading.x, w->self.heading.y,
+        w->opp.valid, w->opp.lost_frames, w->opp.pos.x, w->opp.pos.y,
+        w->opp.vel.x, w->opp.vel.y, w->opp.heading.x, w->opp.heading.y,
+        w->ball.valid, w->ball.lost_frames, w->ball.pos.x, w->ball.pos.y,
+        w->ball.vel.x, w->ball.vel.y, w->ball.heading.x, w->ball.heading.y,
+        ai->st.sdx, ai->st.sdy, ai->st.smx, ai->st.smy,
+        ai->st.odx, ai->st.ody, ai->st.omx, ai->st.omy,
+        ai->st.bdx, ai->st.bdy, ai->st.bmx, ai->st.bmy,
+        motion.v, motion.w, staging.x, staging.y, aim.x, aim.y,
+        sent_l, sent_r
+    );
+    fprint_blob(f, "blob_self", ai->st.self);
+    fprint_blob(f, "blob_opp", ai->st.opp);
+    fprint_blob(f, "blob_ball", ai->st.ball);
+    fprintf(f, "\n");
+    fflush(f);
 }

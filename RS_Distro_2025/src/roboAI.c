@@ -30,8 +30,11 @@
 
 #include "roboAI.h"			// <--- Look at this header file!
 #include "logic/mode_penalty.h"
+#include "logic/mode_chase.h"
 extern int sx;              // Get access to the image size from the imageCapture module
 extern int sy;
+extern char coloursFile[256]; // Whatever calibration file imageCapture.c actually loaded
+                               // (colours.dat by default, or argv[4] if one was given)
 int laggy=0;
 
 /**************************************************************
@@ -211,7 +214,7 @@ struct blob *id_coloured_blob2(struct RoboAI *ai, struct blob *blobs, int col)
  // the user in the U.I.
  if (Mh[0]==-1)
  {
-  f=fopen("colours.dat","r");
+  f=fopen(coloursFile,"r");
   if (f!=NULL)
   {
    fread(&Mh[0],4*sizeof(double),1,f);
@@ -776,9 +779,13 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
   *****************************************************************************/
   if (ai->st.state>=101 && ai->st.state<200)
   {
-   mode_penalty_step(ai, blobs);  // see src/logic/mode_penalty.c; mirrors notes/fsm/penalty.dot
+   mode_penalty_step(ai, blobs);
   }
-  // TODO: mode_chase_step() / mode_soccer_step() go here once those modes exist,
+  else if (ai->st.state>=201 && ai->st.state<300)
+  {
+   mode_chase_step(ai, blobs);
+  }
+  // TODO: mode_soccer_step() goes here once that mode exists,
   // same dispatch pattern (state range -> one function call).
 //  fprintf(stderr,"Just trackin'!\n");	// bot, opponent, and ball.
 //  track_agents(ai,blobs);		// Currently, does nothing but endlessly track

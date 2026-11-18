@@ -2056,3 +2056,194 @@ int BT_restore_previous_display(int no){
  return (0);
 }
 
+int BT_turn_speed(char lport, char lspeed, char rport, char rspeed){
+ ////////////////////////////////////////////////////////////////////////////////////////////////
+ //
+ // Same as BT_turn(), except it sets regulated SPEED instead of open-loop POWER. The EV3 closes
+ // the loop against the motor's own encoder, so the actual cm/s this produces stays consistent
+ // as the battery drains over a match. BT_turn's power percentage doesn't have that guarantee,
+ // since the same power level pulls a slower actual speed as voltage drops.
+ //
+ // Speed must be in [-100, 100]
+ //
+ // Inputs: port identifier of left port
+ //         speed for left port in [-100, 100]
+ //         port identifier of right port
+ //         speed for right port in [-100, 100]
+ //
+ // Returns: 0 on success
+ //          -1 otherwise
+ //////////////////////////////////////////////////////////////////////////////////////////////////
+ void *p;
+ unsigned char *cp;
+ char reply[1024];
+ unsigned char cmd_string[20]={0x12,0x00, 0x00,0x00, 0x00,  0x00,0x00,  0xA5,      0x00,    0x00,      0x81,0x00,    0xA5,     0x00,     0x00, 0x81,0x00,  0xA6,    0x00,   0x00};
+ //                          |length-2| | cnt_id | |type| | header |  |set speed| |layer|  |lport id|  |speed| |set speed| |layer| |rport id| |speed|     |start|  |layer| |port ids|
+
+ if (lspeed>100||lspeed<-100||rspeed>100||rspeed<-100)
+ {
+  fprintf(stderr,"BT_turn_speed: Speed must be in [-100, 100]\n");
+  return(-1);
+ }
+
+ if (lport>8 || rport>8)
+ {
+  fprintf(stderr,"BT_turn_speed: Invalid port id value\n");
+  return(-1);
+ }
+
+ // Set message count id
+ p=(void *)&message_id_counter;
+ cp=(unsigned char *)p;
+ cmd_string[2]=*cp;
+ cmd_string[3]=*(cp+1);
+
+ //set up speed and port for left motor
+ cmd_string[9]=lport;
+ cmd_string[11]=lspeed;
+
+ //set up speed and port for right motor
+ cmd_string[14] = rport;
+ cmd_string[16] = rspeed;
+
+ cmd_string[19] = lport|rport;
+
+#ifdef __BT_debug
+ fprintf(stderr,"BT_turn_speed command string:\n");
+ for(int i=0; i<20; i++)
+ {
+  fprintf(stderr,"%X, ",cmd_string[i]&0xff);
+ }
+ fprintf(stderr,"\n");
+#endif
+
+ write(*socket_id,&cmd_string[0],20);
+ read(*socket_id,&reply[0],1023);
+
+ message_id_counter++;
+
+ if (reply[4]==0x02){
+#ifdef __BT_debug
+  fprintf(stderr,"BT_turn_speed command(): Command successful\n");
+#endif
+ }
+ else{
+  fprintf(stderr,"BT_turn_speed command(): Command failed\n");
+  return(-1);
+ }
+
+ return(0);
+}
+
+int BT_read_battery_voltage(double *volts){
+ ////////////////////////////////////////////////////////////////////////////////////////////////
+ //
+ // Reads the EV3 brick's own battery voltage (opUI_READ, GET_VBATT).
+ //
+ // Unlike BT_turn's power percentage, or BT_turn_speed's regulated speed , this tells you directly
+ // what the battery is doing.
+ //
+ // Inputs: pointer to a double that receives the voltage. Must be non-NULL.
+ //
+ // Returns: 0 on success
+ //          -1 otherwise
+ //////////////////////////////////////////////////////////////////////////////////////////////////
+ void *p;
+ unsigned char *cp;
+ char reply[1024];
+ float v;
+ unsigned char cmd_string[10]={0x08,0x00, 0x00,0x00, 0x00,  0x04,0x00,  0x81,     0x01,    0x60};
+ //                          |length-2| | cnt_id | |type| | header |  |UI_READ| |GET_VBATT| |global var 0|
+
+ if (volts==NULL)
+ {
+  fprintf(stderr,"BT_read_battery_voltage: volts pointer must not be NULL\n");
+  return(-1);
+ }
+
+ // Set message count id
+ p=(void *)&message_id_counter;
+ cp=(unsigned char *)p;
+ cmd_string[2]=*cp;
+ cmd_string[3]=*(cp+1);
+
+#ifdef __BT_debug
+ fprintf(stderr,"BT_read_battery_voltage command string:\n");
+ for(int i=0; i<10; i++)
+ {
+  fprintf(stderr,"%X, ",cmd_string[i]&0xff);
+ }
+ fprintf(stderr,"\n");
+#endif
+
+ write(*socket_id,&cmd_string[0],10);
+ read(*socket_id,&reply[0],1023);
+
+ message_id_counter++;
+
+ if (reply[4]==0x02){
+  memcpy(&v,&reply[5],sizeof(float));
+  *volts=(double)v;
+ }
+ else{
+  fprintf(stderr,"BT_read_battery_voltage command(): Command failed\n");
+  return(-1);
+ }
+
+ return(0);
+}
+
+
+int BT_read_battery_pct(int *pct){
+ ////////////////////////////////////////////////////////////////////////////////////////////////
+ //
+ // Reads the EV3 brick's own battery level as a percentage (opUI_READ, GET_LBATT). This is the same
+ // quantity the brick's own screen shows as the battery icon's fill level.
+ //
+ // Inputs: pointer to an int that receives the percentage. Must be non-NULL.
+ //
+ // Returns: 0 on success
+ //          -1 otherwise
+ //////////////////////////////////////////////////////////////////////////////////////////////////
+ void *p;
+ unsigned char *cp;
+ char reply[1024];
+ unsigned char cmd_string[10]={0x08,0x00, 0x00,0x00, 0x00,  0x01,0x00,  0x81,     0x12,    0x60};
+ //                          |length-2| | cnt_id | |type| | header |  |UI_READ| |GET_LBATT| |global var 0|
+
+ if (pct==NULL)
+ {
+  fprintf(stderr,"BT_read_battery_pct: pct pointer must not be NULL\n");
+  return(-1);
+ }
+
+ // Set message count id
+ p=(void *)&message_id_counter;
+ cp=(unsigned char *)p;
+ cmd_string[2]=*cp;
+ cmd_string[3]=*(cp+1);
+
+#ifdef __BT_debug
+ fprintf(stderr,"BT_read_battery_pct command string:\n");
+ for(int i=0; i<10; i++)
+ {
+  fprintf(stderr,"%X, ",cmd_string[i]&0xff);
+ }
+ fprintf(stderr,"\n");
+#endif
+
+ write(*socket_id,&cmd_string[0],10);
+ read(*socket_id,&reply[0],1023);
+
+ message_id_counter++;
+
+ if (reply[4]==0x02){
+  *pct=(int)(unsigned char)reply[5];
+ }
+ else{
+  fprintf(stderr,"BT_read_battery_pct command(): Command failed\n");
+  return(-1);
+ }
+
+ return(0);
+}

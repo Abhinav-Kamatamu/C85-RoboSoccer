@@ -2,14 +2,122 @@
 #include "../roboAI.h"
 #include "ai_config.h"
 #include "skills.h"
+#include "clock.h"
 #include <math.h>
+#include <pthread.h>
+#include <stdlib.h>
 
-// Kinematics (v, w, WHEEL_TRACK_CM) give each wheel's target speed in
-// cm/s, and then POWER_TO_CMPS converts that to motor power.
+// Kinematics, v (forward) and w (rotation) are converted to a motor
+// command separately, each through its own measured gain, then added.
+// Straight-line driving and in-place spinning were measured as having
+// somewhat different gains (turning saturates sooner than driving),
+// so one combined gain applied to an already-summed wheel speed would get
+// both "pure" cases slightly wrong in opposite directions. Converting v and
+// w through their own gains first and adding the results gets both "pure"
+// cases right and treats combined v+w motion as a linear interpolation between
+// them which should be better than reusing one gain for everything.
 
+#define RESEND_S 0.5
 static double g_last_l = -1000, g_last_r = -1000;
+// Use the open-loop path unless the ROBO_REGULATED
+// environment variable is set to 1
+static int g_use_regulated_speed = -1;
 
-// Makes sure power isn't too low, else sets it to the minimum power we allow
+void drive_set_regulated_speed(int enabled) {
+    g_use_regulated_speed = enabled;
+}
+
+int drive_get_regulated_speed(void) {
+    if (g_use_regulated_speed < 0) {
+        const char *e = getenv("ROBO_REGULATED");
+        g_use_regulated_speed = (e && e[0] == '1') ? 1 : 0;
+    }
+    return g_use_regulated_speed;
+}
+
+// Omg, is this... B09?????
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t cond;
+    int have_cmd;     // 1 once a command is waiting to be sent
+    int is_stop;       // 0 = turn, 1 = all_stop
+    char lpower, rpower;
+    int brake;
+    int use_regulated; // which BT_* call to issue for THIS command
+} BTCommand;
+
+static BTCommand g_cmd = {
+    .lock = PTHREAD_MUTEX_INITIALIZER,
+    .cond = PTHREAD_COND_INITIALIZER,
+    .have_cmd = 0
+};
+static pthread_t g_bt_thread;
+static int g_bt_thread_started = 0;
+
+// ** BT delivery diagnostics (printed by the 'f' output in imageCapture.c) ***
+// The command slot above holds one command and the newest overwrites an unsent
+// one, so a short pulse (spin, then stop 2 frames later) relies on the speed of
+// BT round trip. If the thread is mid-call the spin is overwritten by the stop
+// and never reaches the bot.
+static unsigned g_bt_calls = 0, g_bt_overwritten = 0;
+static double g_bt_ms_sum = 0, g_bt_ms_max = 0;
+
+void drive_get_bt_stats(unsigned *calls, unsigned *overwritten, double *avg_ms, double *max_ms) {
+    pthread_mutex_lock(&g_cmd.lock);
+    *calls = g_bt_calls;
+    *overwritten = g_bt_overwritten;
+    *avg_ms = g_bt_calls ? g_bt_ms_sum / g_bt_calls : 0;
+    *max_ms = g_bt_ms_max;
+    g_bt_ms_sum = 0;
+    g_bt_ms_max = 0;
+    g_bt_calls = 0;
+    g_bt_overwritten = 0; // reset per readout
+    pthread_mutex_unlock(&g_cmd.lock);
+}
+
+// You know what would be really nice here? The never type `!` from Rust.
+// It just got stablized in 1.100.0
+// Lowk can we RIIR this entire project lol
+void *bt_thread_fn(void *arg) {
+    (void)arg;
+    while (1) {
+        pthread_mutex_lock(&g_cmd.lock);
+        while (!g_cmd.have_cmd)
+            pthread_cond_wait(&g_cmd.cond, &g_cmd.lock);
+        int is_stop = g_cmd.is_stop;
+        char lp = g_cmd.lpower, rp = g_cmd.rpower;
+        int brake = g_cmd.brake;
+        int use_regulated = g_cmd.use_regulated;
+        g_cmd.have_cmd = 0;
+        pthread_mutex_unlock(&g_cmd.lock);
+
+        // The actual blocking BT_* call happens with the lock released, so
+        // drive_set()/drive_stop() aren't stuck waiting on this.
+        double bt_t0 = maintenant() * 1e3;
+        if (is_stop)
+            BT_all_stop(brake);
+        else if (use_regulated)
+            BT_turn_speed(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+        else
+            BT_turn(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+        double bt_dt = maintenant() * 1e3 - bt_t0;
+        pthread_mutex_lock(&g_cmd.lock);
+        g_bt_calls++;
+        g_bt_ms_sum += bt_dt;
+        if (bt_dt > g_bt_ms_max) g_bt_ms_max = bt_dt;
+        pthread_mutex_unlock(&g_cmd.lock);
+    }
+    return NULL;
+}
+
+void ensure_bt_thread_started(void) {
+    if (g_bt_thread_started)
+        return;
+    g_bt_thread_started = 1;
+    pthread_create(&g_bt_thread, NULL, bt_thread_fn, NULL);
+}
+
+// Makes sure power isn't too high/low, else sets it to the min/max power we allow
 double apply_min_power(double power) {
     if (power == 0)
         return 0;
@@ -29,41 +137,99 @@ double limit_power_step(double target, double last) {
     return clampd(target, last - MAX_POWER_STEP_PER_FRAME, last + MAX_POWER_STEP_PER_FRAME);
 }
 
-void drive_set(Motion m) {
-    // Kinematics
-    // Each wheel is WHEEL_TRACK_CM / 2 from the robot's center, so while rotating
-    // at w (rad/s) each wheel travels along a path along the circumference of the wheel.
-    // linear speed = radius * angular speed (s = r*theta) [Divide by time].
-    // Add that rotational speed to the forward speed v.
-    // On a left rotation, the inside wheel (left, turning left) is slower,
-    // the outside wheel (right) is faster. w=0 -> both wheels are turning at equal
-    // rates (straight). v=0 -> the wheels are rotating equal and opposite (spin in place).
-    double vl_cmps = m.v - m.w * (WHEEL_TRACK_CM / 2.0);
-    double vr_cmps = m.v + m.w * (WHEEL_TRACK_CM / 2.0);
+void drive_shape_power(Motion m, int use_regulated, double *pl_out, double *pr_out) {
+    static double pulse_acc = 0;
+    double translate, rotate;
+    if (use_regulated) {
+        translate = m.v / SPEED_API_TO_CMPS_GAIN;
+        rotate = (m.w * 180.0 / M_PI) / SPEED_API_TO_DEGPS_GAIN;
+    } else {
+        translate = m.v / POWER_TO_CMPS;
+        rotate = m.w / POWER_TO_RADPS;
+        // Static friction compensation for in-place spins (open loop only. The
+        // regulated mode closes the loop on the encoders itself).
+        if (MIN_SPIN_POWER > 0 && fabs(translate) < SPIN_TRANSLATE_MAX_POWER &&
+            fabs(rotate) > 0.5 && fabs(rotate) < MIN_SPIN_POWER) {
+            pulse_acc += fabs(rotate) / MIN_SPIN_POWER;
+            if (pulse_acc >= 1.0) {
+                pulse_acc -= 1.0;
+                rotate = (rotate > 0) ? MIN_SPIN_POWER : -MIN_SPIN_POWER;
+            } else {
+                rotate = 0;
+            }
+        } else {
+            pulse_acc = 0;
+        }
+    }
+    *pl_out = translate + rotate;
+    *pr_out = translate - rotate;
+}
 
-    double pl = vl_cmps / POWER_TO_CMPS + MOTOR_TRIM_L;
-    double pr = vr_cmps / POWER_TO_CMPS + MOTOR_TRIM_R;
+void drive_set(Motion m, int use_regulated) {
+    // See drive_shape_power() in drive.h for the v/w -> power mapping, the
+    // w sign convention (w>0 = angle_of(heading) increases = clockwise on
+    // screen = physical RIGHT turn. The old mapping turned every command
+    // AWAY from its target) and the in-place-spin static friction compensation.
+    double pl, pr;
+    drive_shape_power(m, use_regulated, &pl, &pr);
+    pl += MOTOR_TRIM_L;
+    pr += MOTOR_TRIM_R;
 
     pl = apply_min_power(pl);
     pr = apply_min_power(pr);
 
-    pl = limit_power_step(pl, g_last_l);
-    pr = limit_power_step(pr, g_last_r);
+    // The per-frame power ramp would split a static friction pulse (0 -> MIN_SPIN_POWER
+    // in one frame) into a weak n-frame ramp that never breaks static
+    // friction, so in-place spins skip it.
+    if (fabs((pl + pr) / 2.0) >= SPIN_TRANSLATE_MAX_POWER) {
+        pl = limit_power_step(pl, g_last_l);
+        pr = limit_power_step(pr, g_last_r);
+    }
 
     pl = clampd(pl, -MAX_POWER, MAX_POWER);
     pr = clampd(pr, -MAX_POWER, MAX_POWER);
 
-    // Dedupe (don't call if values are similar to last time)
-    if (fabs(pl - g_last_l) < 1.0 && fabs(pr - g_last_r) < 1.0)
+    // Dedupe (don't call if values are similar to last time), but re-send
+    // the identical command every RESEND_S anyway. A dropped/failed
+    // BT write would otherwise never be retried, since the dedupe thinks
+    // the bot already has it.
+    static double last_send_t = -1;
+    double now_t = maintenant();
+    if (fabs(pl - g_last_l) < 1.0 && fabs(pr - g_last_r) < 1.0 &&
+        now_t - last_send_t < RESEND_S)
         return;
+    last_send_t = now_t;
 
-    BT_turn(LEFT_MOTOR, (char) lround(pl), RIGHT_MOTOR, (char) lround(pr));
     g_last_l = pl;
     g_last_r = pr;
+
+    ensure_bt_thread_started();
+    pthread_mutex_lock(&g_cmd.lock);
+    if (g_cmd.have_cmd) g_bt_overwritten++;
+    g_cmd.is_stop = 0;
+    g_cmd.lpower = (char) lround(pl);
+    g_cmd.rpower = (char) lround(pr);
+    g_cmd.use_regulated = use_regulated;
+    g_cmd.have_cmd = 1;
+    pthread_cond_signal(&g_cmd.cond);
+    pthread_mutex_unlock(&g_cmd.lock);
+}
+
+void drive_get_last_power(double *left, double *right) {
+    *left = g_last_l < -999 ? 0 : g_last_l;
+    *right = g_last_r < -999 ? 0 : g_last_r;
 }
 
 void drive_stop(int brake) {
-    BT_all_stop(brake);
     g_last_l = 0;
     g_last_r = 0;
+
+    ensure_bt_thread_started();
+    pthread_mutex_lock(&g_cmd.lock);
+    if (g_cmd.have_cmd) g_bt_overwritten++;
+    g_cmd.is_stop = 1;
+    g_cmd.brake = brake;
+    g_cmd.have_cmd = 1;
+    pthread_cond_signal(&g_cmd.cond);
+    pthread_mutex_unlock(&g_cmd.lock);
 }

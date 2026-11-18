@@ -1,4 +1,5 @@
 #include "geometry.h"
+#include "ai_config.h"
 #include <math.h>
 
 Vec2 vec2_add(Vec2 a, Vec2 b) {
@@ -85,8 +86,6 @@ WallDists wall_distances(Vec2 pos, Vec2 field_min, Vec2 field_max) {
     return d;
 }
 
-// Finds whichever of the 4 walls pos is closest to, and returns the unit
-// vector pointing away from that wall, back toward the field's interior.
 Vec2 direction_away_from_nearest_wall(Vec2 pos, Vec2 field_min, Vec2 field_max) {
     WallDists d = wall_distances(pos, field_min, field_max);
     double closest_dist = d.left; // closest wall distance seen so far
@@ -177,9 +176,12 @@ Vec2 plan_wall_push_staging(
     return clamp_to_field(staging, field_min, field_max, min_stage_cm);
 }
 
-int ball_in_goal(Vec2 ball_pos, Vec2 goal, double goal_width, double field_center_x) {
-    int past_line = (goal.x < field_center_x) ? (ball_pos.x <= goal.x)
-                                              : (ball_pos.x >= goal.x);
+int ball_in_goal(
+    Vec2 ball_pos, Vec2 goal, double goal_width,
+    double field_center_x, double ball_radius
+) {
+    int past_line = (goal.x < field_center_x) ? (ball_pos.x <= goal.x + ball_radius)
+                                              : (ball_pos.x >= goal.x - ball_radius);
     return past_line && fabs(ball_pos.y - goal.y) < goal_width / 2.0;
 }
 
@@ -194,15 +196,101 @@ double perp_dist_to_line(Vec2 p, Vec2 a, Vec2 b) {
     return fabs(cross) / len;
 }
 
-Vec2 fix_heading_sign(Vec2 raw, Vec2 vel, double trust_speed_cmps, Vec2 *last_good) {
-    Vec2 candidate = raw;
-    if (vec2_len(vel) > trust_speed_cmps) {
-        if (vec2_dot(raw, vel) < 0) // inverser
-            candidate = vec2_scale(raw, -1);
-    } else if (vec2_len(*last_good) > 1e-6) {
-        if (vec2_dot(raw, *last_good) < 0) // Encore, l'inverser
-            candidate = vec2_scale(raw, -1);
+Vec2 fix_heading_sign(
+    Vec2 raw, Vec2 vel, double trust_speed_cmps, Vec2 *last_good,
+    int *flip_streak, int confirm_frames
+) {
+    // Resolve raw's 180deg ambiguity against the committed direction
+    // first instead of vel.
+    Vec2 aligned = raw;
+    // If the angle between raw and *last_good > 90, but only check if
+    // last_good was actually set (it starts out as 0 for the first frame).
+    if (vec2_len(*last_good) > 1e-6 && vec2_dot(raw, *last_good) < 0)
+        aligned = vec2_scale(raw, -1);
+
+    // Only sustained (HEADING_FLIP_CONFIRM_FRAMES consecutive) disagreement
+    // from vel is allowed to actually change the committed direction. A
+    // single frame's vel is too noisy in DIRECTION to trust on its own,
+    // even past trust_speed_cmps in magnitude
+    if (vec2_len(vel) > trust_speed_cmps && vec2_dot(aligned, vel) < 0) {
+        (*flip_streak)++;
+        if (*flip_streak >= confirm_frames) {
+            aligned = vec2_scale(aligned, -1);
+            *flip_streak = 0;
+        }
+    } else {
+        *flip_streak = 0;
     }
-    *last_good = candidate;
-    return candidate;
+
+    *last_good = aligned;
+    return aligned;
+}
+
+// distance from point p to the segment a-b
+static double seg_point_dist(Vec2 a, Vec2 b, Vec2 p) {
+    Vec2 ab = vec2_sub(b, a);
+    double l2 = vec2_dot(ab, ab);;
+    double t = (l2 < 1e-9) ? 0.0 : vec2_dot(vec2_sub(p, a), ab) / l2;
+    t = fmax(0.0, fmin(1.0, t));
+    return vec2_dist(p, vec2_add(a, vec2_scale(ab, t)));
+}
+
+Vec2 plan_avoid_point(
+    Vec2 from, Vec2 to, Vec2 obstacle, double block_cm,
+    double clear_cm, Vec2 field_min, Vec2 field_max
+) {
+    // If self drives straight from `from` to `to`, does that
+    // line pass too close to an obstacle (for instance, the ball)?
+    // If so, return a detour waypoint. Used in P_GOTO_STAGING, so that
+    // the bot doesn't drive over the ball on its way to the staging point
+    // and accidentally knock it out of position.
+
+    // Check if we're even close to said obstacle to begin with
+    // We do `perp_dist_to_line` by hand instead of calling the function
+    // beause can reuse len here instrad of `perp_dist_to_line` having to
+    // recalculate it each time. Small optimization I suppose.
+    Vec2 seg = vec2_sub(to, from);
+    double len = vec2_len(seg);
+    if (len < 1e-6)
+        return to;
+    Vec2 d = vec2_scale(seg, 1.0 / len);
+    Vec2 rel = vec2_sub(obstacle, from);
+    double along = vec2_dot(rel, d);
+    // signed perpendicular distance
+    double lateral = rel.x * d.y - rel.y * d.x;
+    // Only skip the detour if the destination is practically on the obstacle.
+    // obstacle must lie between the endpoints
+    if (
+        vec2_dist(to, obstacle) < 5.0 ||
+        (along < 0 || along > len) ||
+        fabs(lateral) >= block_cm
+    )
+        return to;
+
+    // Two candidate waypoints, one on each side of the obstacle->destination
+    // line. Each is clamped inside the field with room beyond the wall-recover
+    // trigger margin. Clamping can squash a candidate back next to the obstacle,
+    // so judge each candidate by the clearance its whole two-leg PATH has from
+    // the obstacle, prefer the side the bot is already on, and take the other
+    // side when that one is not clear enough.
+    Vec2 od = vec2_sub(to, obstacle);
+    double odl = vec2_len(od);
+    Vec2 odn = (odl > 1e-6) ? vec2_scale(od, 1.0 / odl) : d;
+    Vec2 p = {-odn.y, odn.x};
+    double via_margin = DEFAULT_WALL_MARGIN_CM + 6.0;
+    Vec2 cand[2];
+    double clr[2]; // store clearances
+    cand[0] = clamp_to_field(vec2_add(obstacle, vec2_scale(p, clear_cm)), field_min, field_max, via_margin);
+    cand[1] = clamp_to_field(vec2_sub(obstacle, vec2_scale(p, clear_cm)), field_min, field_max, via_margin);
+    for (int i = 0; i < 2; i++)
+        clr[i] = fmin(seg_point_dist(from, cand[i], obstacle), seg_point_dist(cand[i], to, obstacle));
+    // Pick a side
+    double on_p = vec2_dot(vec2_sub(from, obstacle), p);
+    int pref = (fabs(on_p) > 3.0) ? (on_p > 0 ? 0 : 1) : (clr[0] >= clr[1] ? 0 : 1);
+    int other = 1 - pref;
+    if (clr[pref] >= block_cm)
+        return cand[pref];
+    if (clr[other] >= block_cm)
+        return cand[other];
+    return (clr[pref] >= clr[other]) ? cand[pref] : cand[other];
 }

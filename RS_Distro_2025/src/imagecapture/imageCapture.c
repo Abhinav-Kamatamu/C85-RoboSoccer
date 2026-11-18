@@ -48,6 +48,14 @@
 #include "../roboAI.h"
 #include <time.h>
 #include <string.h>
+#include "camConfig.h"
+extern void drive_get_bt_stats(unsigned *calls, unsigned *overwritten, double *avg_ms, double *max_ms);
+#ifdef _OPENMP
+#include <omp.h>
+  #define OPENMP_THREADS omp_get_max_threads()
+#else
+  #define OPENMP_THREADS   1
+#endif
 
 //#define __DEBUG
 #define MIN_BLOB_SIZE 500         // Minimum blob size allowed by blobDetect2()
@@ -82,19 +90,6 @@ int colourIdx;                        // Index for blob colour calibration
 double bgThresh=2500;			      // Background subtract threshold
 double colThresh=.5;			      // Saturation threshold
 double colAngThresh=.975;		      // Colour angle threshold
-
-// Camera auto-white-balance/auto-exposure/continuous-autofocus are all on
-// by default on most UVC webcams, and all three continuously re-interpret
-// the scene, which means the hue a pixel reports can drift between
-// when you ran colour calibration ('c') and whenever you're actually
-// playing, or even mid-match as the scene's content/brightness changes.
-// initCam() locks all three to fixed values below right after opening the
-// camera. THESE NUMBERS ARE PLACEHOLDERS. It is confirmed via v4l2-ctl that
-// locking works on this camera, but the actual values need to be tuned by
-// eye once it's mounted where it'll be used.
-int   camWBTempK     = 4500;  // V4L2_CID_WHITE_BALANCE_TEMPERATURE, Kelvin, range ~2800-6500
-int   camExposureTime = 300;  // V4L2_CID_EXPOSURE_ABSOLUTE, driver-specific units (100us steps)
-int   camFocusPos     = 10;   // V4L2_CID_FOCUS_ABSOLUTE, driver-specific units
 
 // Which colour-calibration file to load/save ('g'/'c'). Lets us keep
 // several named calibrations (colours_labroom.dat, colours_home.dat, ...)
@@ -206,6 +201,33 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode,
  return 0;
 }
 
+// per-stage timing for the 'f' readout (printed with the frame budget)
+enum StagesEnum {
+  ST_BGSUB,
+  ST_UNWARP,
+  ST_BLOBS,
+  ST_AI,
+  ST_RENDER,
+  ST_DISPLAY,
+  ST_N // Number of states as last element in the enum
+};
+
+// Global time accumulator per stage
+static double g_stage_ms[ST_N];
+// Global debug variable, count for number of blobs
+static int g_dbg_nblobs = 0;
+// Global store of start time of a stage
+static double g_stage_t0;
+
+double stage_now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
+
+#define STAGE_BEGIN() (g_stage_t0 = stage_now_ms())
+#define STAGE_END(k) (g_stage_ms[k] += stage_now_ms() - g_stage_t0)
+
 void FrameGrabLoop(void)
 {
  ///////////////////////////////////////////////////////////////////
@@ -251,33 +273,69 @@ void FrameGrabLoop(void)
   if (toggleProc==4)        // Colour calibration step
   {
    toggleProc=1;
-   R=(double)(*(frame_buffer+(((int)mcx+((int)(mcy)*sx))*3)+0));
-   G=(double)(*(frame_buffer+(((int)mcx+((int)(mcy)*sx))*3)+1));
-   B=(double)(*(frame_buffer+(((int)mcx+((int)(mcy)*sx))*3)+2));
-    
-   rgb2hsv(R/255.0,G/255.0,B/255.0,&Hu,&Sa,&Va);
-   Mhues[colourIdx]=Hu;
-     
-   // Obtain reference RGB value - a pure colour with the given HUE, S=1, V=1;
-   hsv2rgb(Hu,1.0,1.0,&R,&G,&B);     // Disable to keep original RGB
-   Mrgb[colourIdx][0]=R;
-   Mrgb[colourIdx][1]=G;
-   Mrgb[colourIdx][2]=B;
-
-   colourIdx++;
-   fprintf(stderr,"Recording colour value #%d at %f,%f has RGB=%f,%f,%f, hue=%f\n",colourIdx,mcx,mcy,R,G,B,Hu);
-   if (colourIdx==4) 
+   // Average a small patch around the crosshair instead of just believing a
+   // singular pixel.
+   // Clipped pixels (any channel saturated near 255) are skipped entirely
+   // rather than averaged in. A highlight has legitimately ZERO useful
+   // colour information left in it. Averaging clipped pixels together with
+   // good ones would drag the result toward white. A bigger sample
+   // window wouldn't fix that either. We must discard of these failures
+   double Rsum=0, Gsum=0, Bsum=0;
+   int nsamp=0;
+  for (int dy = -CAL_SAMPLE_RADIUS; dy <= CAL_SAMPLE_RADIUS; dy++) {
+    for (int dx = -CAL_SAMPLE_RADIUS; dx <= CAL_SAMPLE_RADIUS; dx++) {
+      int px= (int) mcx + dx;
+      int py= (int) mcy + dy;
+      if ( px<0 || px>=sx || py<0 || py>=sy)
+        continue;
+      unsigned char *p = frame_buffer+((px+py*sx)*3);
+      if (p[0] >= CAL_CLIP_THRESH || p[1] >= CAL_CLIP_THRESH || p[2] >= CAL_CLIP_THRESH)
+        continue;
+      Rsum += p[0]; Gsum += p[1]; Bsum += p[2];
+      nsamp++;
+    }
+  }
+   if (nsamp==0)
    {
-     f=fopen(coloursFile,"w");
-     fwrite(&Mhues[0],4*sizeof(double),1,f);
-     fwrite(&Mrgb[0][0],4*3*sizeof(double),1,f);
-     fwrite(&bgThresh,sizeof(double),1,f);
-     fwrite(&colAngThresh,sizeof(double),1,f);
-     fwrite(&colThresh,sizeof(double),1,f);
-     fclose(f);
-     fprintf(stderr,"Saved colour calibration data.\n");
-     toggleProc=0;	// Done!
-     gotCol=1;
+    // Every pixel in the patch was clipped. The crosshair is sitting
+    // right in the middle of a highlight, and there's no real
+    // colour information left to gather
+    // Don't commit anything for this attempt. colourIdx does
+    // NOT advance, so the same slot (same object) is still waiting.
+    // Just move the crosshair off the hotspot and press space again.
+    fprintf(stderr,"[imageCapture] colour sample #%d: entire patch was clipped/saturated. "
+                    "Aim away from any shiny highlight and press space again.\n", colourIdx);
+   }
+   else
+   {
+    R = Rsum/nsamp;
+    G = Gsum/nsamp;
+    B = Bsum/nsamp;
+
+    rgb2hsv(R/255.0,G/255.0,B/255.0,&Hu,&Sa,&Va);
+    Mhues[colourIdx]=Hu;
+
+    // Obtain reference RGB value, a pure colour with the given HUE, S=1, V=1;
+    hsv2rgb(Hu,1.0,1.0,&R,&G,&B);     // Disable to keep original RGB
+    Mrgb[colourIdx][0]=R;
+    Mrgb[colourIdx][1]=G;
+    Mrgb[colourIdx][2]=B;
+
+    colourIdx++;
+    fprintf(stderr,"Recording colour value #%d at %f,%f has RGB=%f,%f,%f, hue=%f\n",colourIdx,mcx,mcy,R,G,B,Hu);
+    if (colourIdx==4)
+    {
+      f=fopen(coloursFile,"w");
+      fwrite(&Mhues[0],4*sizeof(double),1,f);
+      fwrite(&Mrgb[0][0],4*3*sizeof(double),1,f);
+      fwrite(&bgThresh,sizeof(double),1,f);
+      fwrite(&colAngThresh,sizeof(double),1,f);
+      fwrite(&colThresh,sizeof(double),1,f);
+      fclose(f);
+      fprintf(stderr,"Saved colour calibration data.\n");
+      toggleProc=0;	// Done!
+      gotCol=1;
+    }
    }
   }
   
@@ -399,7 +457,9 @@ void FrameGrabLoop(void)
     deleteImage(t3);
 #endif      
 
+    STAGE_BEGIN();
     bgSubtract3();
+    STAGE_END(ST_BGSUB);
     
 // HERE: We may want to do a bit of filtering and denoising - 
 
@@ -409,7 +469,9 @@ void FrameGrabLoop(void)
     deleteImage(t3);
 #endif      
     
+   STAGE_BEGIN();
    fieldUnwarp2();
+   STAGE_END(ST_UNWARP);
 
 #ifdef __DEBUG
    t2=imageFromBuffer(fieldIm,sx,sy,3);
@@ -426,7 +488,9 @@ void FrameGrabLoop(void)
 //   deleteImage(t2);
 /////////  END TESTING CODE  ////////
 
+   STAGE_BEGIN();
    labIm=blobDetect2(&blobs,&nblobs);
+   STAGE_END(ST_BLOBS);
 //   labIm=NULL;            // To test without blob detection
 //   blobs=NULL;
       
@@ -440,8 +504,11 @@ void FrameGrabLoop(void)
    //  the blob ids are also set.   
    if (blobs)
    {
+    STAGE_BEGIN();
     if (doAI==1) skynet.runAI(&skynet,blobs,NULL);
     else if (doAI==2) skynet.calibrate(&skynet,blobs);
+    STAGE_END(ST_AI);
+    STAGE_BEGIN();
     blobIm=renderBlobs(labIm,blobs);
     // Render anything in the display list
     dp=skynet.DPhead;
@@ -459,9 +526,12 @@ void FrameGrabLoop(void)
       }
       dp=dp->next;
     }
+    STAGE_END(ST_RENDER);
    }
    deleteImage(labIm);
   }
+  g_dbg_nblobs = nblobs;
+  STAGE_BEGIN();
   
   ////////////////////////////////////////////////////////////////////
   // Render whatever we are going to display onto the texture image
@@ -567,6 +637,7 @@ void FrameGrabLoop(void)
   // Swap buffers to enable smooth animation
   glutSwapBuffers();
 
+  STAGE_END(ST_DISPLAY);
   // Clean Up - Do all the image processing, AI, and planning before this code
   frame++;
 
@@ -1177,6 +1248,82 @@ struct image *blobDetect2(struct blob **blob_list, int *nblobs)
          *(tmpIm->layers[0]+x-1+(y*sx)) *= -1.0;
          *(tmpIm->layers[1]+x-1+(y*sx)) *= -1.0;
          *(tmpIm->layers[2]+x-1+(y*sx)) *= -1.0;
+        }
+       }
+      }
+      // Added support for diagonal neighbours. Without these, a single-pixel diagonal gap 
+      // splits what is physically one blob into two separate labels, since 4-way
+      // connectivity never passes through a diagonal gap. This **could** protect us if
+      // we're at a weird angle and the jersey almost splits into two but hangs by a thread.
+      if (x>0&&y>0) {
+        R=*(tmpIm->layers[0]+x-1+((y-1)*sx));
+        G=*(tmpIm->layers[1]+x-1+((y-1)*sx));
+        B=*(tmpIm->layers[2]+x-1+((y-1)*sx));
+        if (R+G+B>0) {
+          rgb2hsv(R/255.0,G/255.0,B/255.0,&tH,&tS,&tV);
+          tHx=cos(tH);
+          tHy=sin(tH);
+          if (fabs((tHx*Hx)+(tHy*Hy))>colAngThresh) {
+            stackPtr++;
+            *(stack+(2*stackPtr))=x-1;
+            *(stack+(2*stackPtr)+1)=y-1;
+            *(tmpIm->layers[0]+x-1+((y-1)*sx)) *= -1.0;
+            *(tmpIm->layers[1]+x-1+((y-1)*sx)) *= -1.0;
+            *(tmpIm->layers[2]+x-1+((y-1)*sx)) *= -1.0;
+          }
+        }
+      }
+      if (x<sx-1&&y>0) {
+       R=*(tmpIm->layers[0]+x+1+((y-1)*sx));
+       G=*(tmpIm->layers[1]+x+1+((y-1)*sx));
+       B=*(tmpIm->layers[2]+x+1+((y-1)*sx));
+       if (R+G+B>0) {
+        rgb2hsv(R/255.0,G/255.0,B/255.0,&tH,&tS,&tV);
+        tHx=cos(tH);
+        tHy=sin(tH);
+        if (fabs((tHx*Hx)+(tHy*Hy))>colAngThresh) {
+         stackPtr++;
+         *(stack+(2*stackPtr))=x+1;
+         *(stack+(2*stackPtr)+1)=y-1;
+         *(tmpIm->layers[0]+x+1+((y-1)*sx)) *= -1.0;
+         *(tmpIm->layers[1]+x+1+((y-1)*sx)) *= -1.0;
+         *(tmpIm->layers[2]+x+1+((y-1)*sx)) *= -1.0;
+        }
+       }
+      }
+      if (x>0&&y<sy-1) {
+       R=*(tmpIm->layers[0]+x-1+((y+1)*sx));
+       G=*(tmpIm->layers[1]+x-1+((y+1)*sx));
+       B=*(tmpIm->layers[2]+x-1+((y+1)*sx));
+       if (R+G+B>0) {
+        rgb2hsv(R/255.0,G/255.0,B/255.0,&tH,&tS,&tV);
+        tHx=cos(tH);
+        tHy=sin(tH);
+        if (fabs((tHx*Hx)+(tHy*Hy))>colAngThresh) {
+         stackPtr++;
+         *(stack+(2*stackPtr))=x-1;
+         *(stack+(2*stackPtr)+1)=y+1;
+         *(tmpIm->layers[0]+x-1+((y+1)*sx)) *= -1.0;
+         *(tmpIm->layers[1]+x-1+((y+1)*sx)) *= -1.0;
+         *(tmpIm->layers[2]+x-1+((y+1)*sx)) *= -1.0;
+        }
+       }
+      }
+      if (x<sx-1&&y<sy-1) {
+       R=*(tmpIm->layers[0]+x+1+((y+1)*sx));
+       G=*(tmpIm->layers[1]+x+1+((y+1)*sx));
+       B=*(tmpIm->layers[2]+x+1+((y+1)*sx));
+       if (R+G+B>0) {
+        rgb2hsv(R/255.0,G/255.0,B/255.0,&tH,&tS,&tV);
+        tHx=cos(tH);
+        tHy=sin(tH);
+        if (fabs((tHx*Hx)+(tHy*Hy))>colAngThresh) {
+         stackPtr++;
+         *(stack+(2*stackPtr))=x+1;
+         *(stack+(2*stackPtr)+1)=y+1;
+         *(tmpIm->layers[0]+x+1+((y+1)*sx)) *= -1.0;
+         *(tmpIm->layers[1]+x+1+((y+1)*sx)) *= -1.0;
+         *(tmpIm->layers[2]+x+1+((y+1)*sx)) *= -1.0;
         }
        }
       }
@@ -1967,7 +2114,7 @@ void yuyv_to_rgb (struct vdIn *vd, int sx, int sy)
    }   // End for x  
   }  
 }
-    
+
 struct vdIn *initCam(const char *videodevice, int width, int height)
 {
  /* 
@@ -1979,11 +2126,13 @@ struct vdIn *initCam(const char *videodevice, int width, int height)
 	int hwaccel = 1;
 	const char *mode = NULL;
 	int format = V4L2_PIX_FMT_MJPEG; // Was V4L2_PIX_FMT_YUYV
-    int i;					
+	if (getenv("ROBOSOCCER_FORCE_YUYV")!=NULL) // Here just in case, but we're not going back
+    format = V4L2_PIX_FMT_YUYV;
+  int i;					
 	int grabmethod = 1;
 	int fps = 30;
 	unsigned char frmrate = 0;
-    char avifilename[1024]="video.avi";
+  char avifilename[1024]="video.avi";
 	int queryformats = 0;
 	int querycontrols = 0;
 	int readconfigfile = 0;
@@ -2004,19 +2153,31 @@ struct vdIn *initCam(const char *videodevice, int width, int height)
 			 grabmethod, &avifilename[0]) < 0)
 		return(NULL);
 
-	// Lock auto-white-balance/auto-exposure/continuous-autofocus to fixed
+	// We lock auto-white-balance/auto-exposure/continuous-autofocus to fixed
 	// values. Not every camera supports every one of these controls.
-  // v4l2SetControl already no-ops safely via isv4l2Control() when a
-  // control doesn't exist, so this is safe to call unconditionally.
-	v4l2SetControl(videoIn, V4L2_CID_AUTO_WHITE_BALANCE, 0);
-	v4l2SetControl(videoIn, V4L2_CID_WHITE_BALANCE_TEMPERATURE, camWBTempK);
+  // v4l2SetControl already no-ops safely when a control doesn't exist,
+  // so either way, it's safe to call
+#if CAM_LOCK_EXPOSURE
 	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_AUTO, 1); // "Manual Mode"
-	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_ABSOLUTE, camExposureTime);
+	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_ABSOLUTE, CAM_EXPOSURE_TIME);
+#else
+	v4l2SetControl(videoIn, V4L2_CID_EXPOSURE_AUTO, 3); // Aperture Priority
+#endif
+#if CAM_LOCK_WB_FOCUS
+	v4l2SetControl(videoIn, V4L2_CID_AUTO_WHITE_BALANCE, 0);
+	v4l2SetControl(videoIn, V4L2_CID_WHITE_BALANCE_TEMPERATURE, CAM_WB_TEMP_K);
 	v4l2SetControl(videoIn, V4L2_CID_FOCUS_AUTO, 0);
-	v4l2SetControl(videoIn, V4L2_CID_FOCUS_ABSOLUTE, camFocusPos);
+	v4l2SetControl(videoIn, V4L2_CID_FOCUS_ABSOLUTE, CAM_FOCUS_POS);
+#else
+	v4l2SetControl(videoIn, V4L2_CID_AUTO_WHITE_BALANCE, 1);
+	v4l2SetControl(videoIn, V4L2_CID_FOCUS_AUTO, 1);
+#endif
 
 	return(videoIn);		// Successfully opened a video device
 }
+
+#define TS_MS(a, b) (((b).tv_sec - (a).tv_sec) * 1000.0 + ((b).tv_nsec - (a).tv_nsec) / 1e6)
+#define FPS_WINDOW 30
 
 void getFrame(struct vdIn *videoIn, int sx, int sy)
 {
@@ -2025,19 +2186,95 @@ void getFrame(struct vdIn *videoIn, int sx, int sy)
  */
     double dtime;
 
+	// Detailed timing breakdown for the 'f' FPS readout. We print time blocked waiting for the
+	// camera (uvcGrab), time converting YUYV->RGB, and "everything else" =
+	// time since the previous getFrame() returned (blob detection, AI,
+	// drawing, logging, GL). If "wait" is prominent, the camera is the bottleneck
+	// (exposure / auto-exposure); if "other" is prominent, our processing is.
+	extern double g_dbg_dqbuf_ms, g_dbg_decode_ms, g_dbg_kernel_dt_ms;
+	extern unsigned g_dbg_seq_gap_total;
+	static struct timespec t_prev_end = {0, 0};
+	struct timespec t0, t1_, t2_;
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+
 	// Grab a frame from the video device
 	if (uvcGrab(videoIn) < 0) {
 		fprintf(stderr,"getFrame(): There was an error grabbing the frame from the webcam.\n");
 		return;
 	}
-    yuyv_to_rgb(videoIn, sx, sy); 
-    videoIn->getPict = 0;
+	clock_gettime(CLOCK_MONOTONIC, &t1_);
+  yuyv_to_rgb(videoIn, sx, sy); 
+  videoIn->getPict = 0;
+	clock_gettime(CLOCK_MONOTONIC, &t2_);
 
-	// Print FPS if needed.
-    frameNo++;
-    time(&time2);
-    dtime=difftime(time2,time1);
-    if (printFPS) fprintf(stderr,"FPS= %f\n",(double)frameNo/dtime);
+  static double sum_wait = 0, sum_conv = 0, sum_other = 0, sum_dq = 0, sum_dec = 0, sum_kdt = 0;
+  static int n_t = 0;
+  if (t_prev_end.tv_sec != 0) {
+      sum_other += TS_MS(t_prev_end, t0);
+      sum_wait += TS_MS(t0, t1_);
+      sum_conv += TS_MS(t1_, t2_);
+      sum_dq += g_dbg_dqbuf_ms;
+      sum_dec += g_dbg_decode_ms;
+      sum_kdt += g_dbg_kernel_dt_ms;
+      n_t++;
+      if (n_t == 60) {
+          if (printFPS) {
+              fprintf(stderr, "frame budget (avg of 60): wait-for-camera %.1f ms | yuyv->rgb %.1f ms | our processing+display %.1f ms\n",
+                      sum_wait / n_t, sum_conv / n_t, sum_other / n_t);
+              fprintf(stderr, "   inside grab: DQBUF block %.1f ms | memcpy+jpeg_decode %.1f ms | kernel frame spacing %.1f ms | frames dropped by driver so far: %u\n",
+                      sum_dq / n_t, sum_dec / n_t, sum_kdt / n_t, g_dbg_seq_gap_total);
+              {
+                  unsigned bt_calls, bt_over; double bt_avg, bt_max;
+                  drive_get_bt_stats(&bt_calls, &bt_over, &bt_avg, &bt_max);
+                  fprintf(stderr, "   BT commands (last 60 frames): %u sent, %u overwritten before sending | BT call time avg %.0f ms, max %.0f ms\n",
+                          bt_calls, bt_over, bt_avg, bt_max);
+              }
+              long rss_pages = 0;
+              // We read this special linux file to get stats about ourselves. Note that this is only
+              // called every 60 frames, ~2 seconds, so it's not a performance issue. If any of these
+              // numbers suddenly spike, then something might be very wrong. Be sure that whatever is
+              // causing said spike is intentional. I needed this to verify OpenMP was actually doing
+              // its thing
+              FILE *sm = fopen("/proc/self/statm", "r");
+              if (sm) {
+                long sz;
+                if (fscanf(sm, "%ld %ld", &sz, &rss_pages) != 2)
+                  rss_pages = 0;
+                fclose(sm);
+              }
+              fprintf(stderr, "   our processing split (avg ms/frame): bg-subtract %.1f | field-unwarp %.1f | blob-detect %.1f | AI(track+logic+log) %.1f | render-blobs %.1f | display/GL %.1f || blobs=%d  RSS=%ld MB  OpenMP threads=%d\n",
+                      g_stage_ms[ST_BGSUB] / n_t, g_stage_ms[ST_UNWARP] / n_t, g_stage_ms[ST_BLOBS] / n_t,
+                      g_stage_ms[ST_AI] / n_t, g_stage_ms[ST_RENDER] / n_t, g_stage_ms[ST_DISPLAY] / n_t,
+                      g_dbg_nblobs, rss_pages * 4096 / (1024 * 1024),
+                      OPENMP_THREADS);
+          }
+          for (int k = 0; k < ST_N; k++)
+            g_stage_ms[k] = 0;
+          sum_wait = sum_conv = sum_other = sum_dq = sum_dec = sum_kdt = 0;
+          n_t = 0;
+      }
+  }
+  t_prev_end = t2_;
+
+	// Print FPS if needed. This used to print frameNo / (whole seconds since
+	// time1), a running average from program start.
+	frameNo++;
+  static struct timespec stamps[FPS_WINDOW];
+  static int nstamps = 0, head = 0;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (nstamps == FPS_WINDOW) {
+      struct timespec old = stamps[head];
+      double span = (now.tv_sec - old.tv_sec) + (now.tv_nsec - old.tv_nsec) / 1e9;
+      if (printFPS && span > 0)
+          fprintf(stderr, "FPS= %.1f (last %d frames, %.0f ms/frame)\n",
+                  (FPS_WINDOW) / span, FPS_WINDOW, 1000.0 * span / FPS_WINDOW);
+  } else {
+      nstamps++;
+  }
+  stamps[head] = now;
+  head = (head + 1) % FPS_WINDOW;
+  (void)dtime;
 }
 
 void closeCam(struct vdIn *videoIn)
