@@ -6,7 +6,7 @@ roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avili
 			logic/mode_soccer.c logic/mode_soccer_adapter.c
 # Run log / flight recorder (see logic/runlog.h). Kept on its own line so it
 # merges cleanly with changes to the list above.
-roboSoccer_SOURCES += logic/runlog.c
+roboSoccer_SOURCES += logic/runlog.c imagecapture/framelog.c
 CC=g++
 AM_CPPFLAGS=-fpermissive
 # OpenMP: the vision code (fieldUnwarp2, bgSubtract3, display copy, imageProc)

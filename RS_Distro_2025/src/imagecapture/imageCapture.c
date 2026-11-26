@@ -46,6 +46,8 @@
 #include "imageCapture.h"
 #include "svdDynamic.h"
 #include "../roboAI.h"
+#include "framelog.h"
+#include "../logic/runlog.h"
 #include <time.h>
 #include <string.h>
 #include "camConfig.h"
@@ -118,6 +120,16 @@ int got_Y=0;				                    // Got Y adjustment
 /*********************************************************************
 Image processing setup and frame processing loop
 **********************************************************************/
+// Ctrl+C / kill while logging: quit the same way 'q' does (robot stopped, run
+// log + replay buffer saved) instead of dying mid-write. A second Ctrl+C
+// exits immediately. Only installed when logging is on.
+static volatile sig_atomic_t g_quit_requested = 0;
+static void on_quit_signal(int sig)
+{
+ if (g_quit_requested) {signal(sig,SIG_DFL); raise(sig); return;}
+ g_quit_requested=1;
+}
+
 int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode, const char *coloursCalFile, int logItems)
 {
  ///////////////////////////////////////////////////////////////////////////////////
@@ -172,6 +184,15 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode,
  sx=webcam->width;
  sy=webcam->height;
  fprintf(stderr,"Camera initialized! grabbing frames at %d x %d\n",sx,sy);
+
+ // Run log / flight recorder (logic/runlog.h, framelog.h).
+ // logItems bits: 0 = text logs, 1 = display frames, 2 = raw camera/field frames
+ if (logItems>0)
+ {
+  int logOn=runlog_start(logItems,own_col,AI_mode,sx,sy,coloursFile);
+  framelog_start(logOn,runlog_dir(),sx,sy);
+  if (logOn) {signal(SIGINT,on_quit_signal); signal(SIGTERM,on_quit_signal);}
+ }
  
  // Done, set up OpenGL and call particle filter loop
  fprintf(stderr,"Entering main loop...\n");
@@ -215,6 +236,7 @@ enum StagesEnum {
   ST_AI,
   ST_RENDER,
   ST_DISPLAY,
+  ST_LOG,
   ST_N // Number of states as last element in the enum
 };
 
@@ -273,6 +295,8 @@ void FrameGrabLoop(void)
   ***************************************************/
   big=&bigIm[0];
   getFrame(webcam,sx,sy);
+  if (g_quit_requested) kbHandler('q',0,0);
+  runlog_frame_begin(frameNo,stage_now_ms()/1000.0);
   ox=420;
   oy=1;
 
@@ -532,9 +556,11 @@ void FrameGrabLoop(void)
       }
       dp=dp->next;
     }
+    framelog_overlay(blobIm);   // robot intent on top (only while logging display frames)
     STAGE_END(ST_RENDER);
    }
    deleteImage(labIm);
+   framelog_log_blobs(blobs);
   }
   g_dbg_nblobs = nblobs;
   STAGE_BEGIN();
@@ -543,6 +569,7 @@ void FrameGrabLoop(void)
   // Render whatever we are going to display onto the texture image
   // buffer used by OpenGL
   //////////////////////////////////////////////////////////////////// 
+  int fl_kind=(H==NULL||toggleProc>0||gotCol==0)?0:(blobIm==NULL?1:2);   // what is on screen, for framelog
   if (H==NULL||toggleProc>0||gotCol==0)
   {
    // We don't have corners, or colour reference values for blobs, display input image.
@@ -644,6 +671,12 @@ void FrameGrabLoop(void)
   glutSwapBuffers();
 
   STAGE_END(ST_DISPLAY);
+
+  // Run log: hand this frame's picture to the recorder, close the frame's log line
+  STAGE_BEGIN();
+  framelog_frame(frameNo,stage_now_ms()/1000.0,big+(128*1024*3),fl_kind,fieldIm,frame_buffer);
+  runlog_frame_end();
+  STAGE_END(ST_LOG);
   // Clean Up - Do all the image processing, AI, and planning before this code
   frame++;
 
@@ -1853,6 +1886,8 @@ void kbHandler(unsigned char key, int x, int y)
  if (key=='q') 
  {
   BT_all_stop(0);
+  framelog_stop();   // save replay buffer + queued images (robot already stopped)
+  runlog_stop();
   releaseBlobs(blobs);
   deleteImage(proc_im);
   glDeleteTextures(1,&texture);
@@ -2030,6 +2065,7 @@ void kbHandler(unsigned char key, int x, int y)
  }
 
  
+ if (key=='b') {runlog_mark("bookmark (b key)"); fprintf(stderr,"Bookmarked frame %d in the run log\n",frameNo);}
  if (key=='f') {if (printFPS==0) printFPS=1; else printFPS=0;}
 
  // Robot robot manual override
@@ -2253,6 +2289,8 @@ void getFrame(struct vdIn *videoIn, int sx, int sy)
                       g_stage_ms[ST_AI] / n_t, g_stage_ms[ST_RENDER] / n_t, g_stage_ms[ST_DISPLAY] / n_t,
                       g_dbg_nblobs, rss_pages * 4096 / (1024 * 1024),
                       OPENMP_THREADS);
+              if (runlog_items())
+                  fprintf(stderr, "   run log (frame copies + log line): %.1f ms/frame\n", g_stage_ms[ST_LOG] / n_t);
           }
           for (int k = 0; k < ST_N; k++)
             g_stage_ms[k] = 0;

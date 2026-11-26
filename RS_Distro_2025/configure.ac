@@ -25,6 +25,8 @@ AC_CHECK_LIB([jpeg], [jpeg_CreateCompress])
 AC_CHECK_LIB([bluetooth], [baswap])
 AC_CHECK_LIB([m], [sqrt])
 AC_CHECK_LIB([pthread], [pthread_create])
+# zlib: PNG frames for the run log (src/imagecapture/framelog.c)
+AC_CHECK_LIB([z], [compress2])
 
 # Checks for header files.
 AC_PATH_X
