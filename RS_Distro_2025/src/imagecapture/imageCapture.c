@@ -48,6 +48,8 @@
 #include "../roboAI.h"
 #include <time.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "camConfig.h"
 extern void drive_get_bt_stats(unsigned *calls, unsigned *overwritten, double *avg_ms, double *max_ms);
 #ifdef _OPENMP
@@ -115,6 +117,54 @@ double ref_Y[2];                                // Y reference coorditanes from 
 int got_Y=0;				                    // Got Y adjustment
 // ** END OF GLOBAL DATA DECLARATIONS ** //
 
+// ---- logItems-driven periodic snapshots (not part of the starter code) ----
+// bit0 = world.log (actually handled separately by ENABLE_FRAME_LOG in
+// logic/ai_config.h - unrelated existing mechanism, left alone here).
+// bit1 = annotated/processed frames - not implemented yet.
+// bit2 = raw camera frames, periodically, for later opponent-dimension
+// scouting from the footage (position logs only have blob centroids, not
+// what the opponent actually looks like).
+#define LOGITEMS_WORLD     0x1
+#define LOGITEMS_ANNOTATED 0x2
+#define LOGITEMS_CAMERA    0x4
+// One snapshot every this many seconds, not every frame. Back to 1s: now
+// that this saves the camera's own real (small) JPEG bytes instead of an
+// uncompressed PPM, storage isn't the constraint it was - 1s gives enough
+// samples to trace the opponent's movement by eye, not just its size.
+#define CAMERA_SNAPSHOT_PERIOD_S 1.0
+static int g_log_items = 0;
+static char g_log_dir[256] = "";
+
+// ---- calibration crosshair speed-up (not part of the starter code) ----
+// Tab, held, makes WASD corner-calibration jumps CALIB_TAB_STEP px
+// instead of 1 (plain) or 5 (Shift) - calibrating all 4 corners inside a
+// demo's 2-minute setup window needs bigger jumps than Shift alone.
+// GLUT's normal keyboard callback has no concept of "held" for a key
+// that isn't Shift/Ctrl/Alt, so this is tracked explicitly via
+// glutKeyboardUpFunc (kbUpHandler), not glutGetModifiers().
+#define CALIB_TAB_STEP 25
+static int g_tab_held = 0;
+void kbUpHandler(unsigned char key, int x, int y) {
+    (void)x; (void)y;
+    if (key == '\t') g_tab_held = 0;
+}
+
+// Minimal recursive mkdir -- creates each path segment that doesn't
+// already exist. EEXIST on a segment that's already there is fine.
+static void mkdir_p(const char *path) {
+    char tmp[256];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = 0;
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
+        }
+    }
+    mkdir(tmp, 0755);
+}
+
 /*********************************************************************
 Image processing setup and frame processing loop
 **********************************************************************/
@@ -151,6 +201,20 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode,
  //
  ///////////////////////////////////////////////////////////////////////////////////
  toggleProc=0;
+ g_log_items = logItems;
+ if (g_log_items & LOGITEMS_CAMERA) {
+     time_t t = time(NULL);
+     struct tm tm_now;
+     localtime_r(&t, &tm_now);
+     char stamp[64];
+     strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tm_now);
+     snprintf(g_log_dir, sizeof(g_log_dir), ".local/logs/%s", stamp);
+     char camera_dir[300];
+     snprintf(camera_dir, sizeof(camera_dir), "%s/camera", g_log_dir);
+     mkdir_p(camera_dir);
+     fprintf(stderr, "[imageCapture] saving a camera snapshot every %.0fs to %s/\n",
+             CAMERA_SNAPSHOT_PERIOD_S, camera_dir);
+ }
  AIMode=AI_mode;
  botCol=own_col;
  if (coloursCalFile!=NULL && coloursCalFile[0]!=0)
@@ -275,6 +339,45 @@ void FrameGrabLoop(void)
   getFrame(webcam,sx,sy);
   ox=420;
   oy=1;
+
+  // Periodic raw-camera snapshot (LOGITEMS_CAMERA). Tracks an explicit
+  // next-snapshot time instead of a frame-count modulo, same reason as
+  // the sim_visual_demo.c debug-print fix earlier this project: a frame
+  // count only lines up with wall-clock seconds if the frame rate is
+  // exactly what you assumed.
+  if (g_log_items & LOGITEMS_CAMERA) {
+      static double next_snap_s = 0;
+      double now_s = stage_now_ms() / 1000.0;
+      if (now_s >= next_snap_s) {
+          next_snap_s = now_s + CAMERA_SNAPSHOT_PERIOD_S;
+          char fname[320];
+          // The camera already delivers real JPEG frames when negotiated
+          // as MJPEG (webcam->tmpbuffer holds that frame's compressed
+          // bytes, copied in by uvcGrab() right before it calls
+          // jpeg_decode() - this codebase only ever decodes JPEG, it has
+          // no encoder, so those bytes are the actual camera JPEG, not a
+          // re-encode). Save those directly instead of the decoded,
+          // uncompressed frame_buffer - a real .jpg as expected, and far
+          // smaller than a PPM of the same frame.
+          if (webcam->formatIn == V4L2_PIX_FMT_MJPEG && webcam->tmpbuffer && webcam->buf.bytesused > 0) {
+              snprintf(fname, sizeof(fname), "%s/camera/%ld.jpg", g_log_dir, (long)time(NULL));
+              FILE *jf = fopen(fname, "wb");
+              if (jf) {
+                  fwrite(webcam->tmpbuffer, webcam->buf.bytesused, 1, jf);
+                  fclose(jf);
+              }
+          } else {
+              // YUYV (or anything else): no compressed bytes exist to save
+              // directly, fall back to the decoded frame as a PPM.
+              struct image *snap = imageFromBuffer(frame_buffer, sx, sy, 3);
+              if (snap) {
+                  snprintf(fname, sizeof(fname), "%s/camera/%ld.ppm", g_log_dir, (long)time(NULL));
+                  writePPM(fname, snap);
+                  deleteImage(snap);
+              }
+          }
+      }
+  }
 
   if (toggleProc==4)        // Colour calibration step
   {
@@ -1830,6 +1933,7 @@ void initGlut(char* winName)
  glutReshapeFunc(WindowReshape);   // Call WindowReshape whenever window resized
  glutDisplayFunc(FrameGrabLoop);   // Main display function is also the main loop
  glutKeyboardFunc(kbHandler);
+ glutKeyboardUpFunc(kbUpHandler);
 }
 
 void kbHandler(unsigned char key, int x, int y)
@@ -1989,14 +2093,19 @@ void kbHandler(unsigned char key, int x, int y)
   mcy=340;
   fprintf(stderr,"Starting corner selection - please place the crosshair at corners top-left, top-right, bottom-right, and bottom-left, and press space for each.\n");
  }
- if (key=='d'&&toggleProc>0) if (mcx<sx-1) mcx++;
- if (key=='a'&&toggleProc>0) if (mcx>1) mcx--;
- if (key=='w'&&toggleProc>0) if (mcy>1) mcy--;
- if (key=='s'&&toggleProc>0) if (mcy<sy-1) mcy++;
- if (key=='D'&&toggleProc>0) if (mcx<sx-6) mcx+=5;
- if (key=='A'&&toggleProc>0) if (mcx>5) mcx-=5;
- if (key=='W'&&toggleProc>0) if (mcy>5) mcy-=5;
- if (key=='S'&&toggleProc>0) if (mcy<sy-6) mcy+=5;
+ // Tab (held, tracked via kbUpHandler since GLUT doesn't report it as a
+ // modifier the way Shift is) takes priority over Shift for an even
+ // bigger step - calibrating all 4 corners in 2 minutes needs bigger
+ // jumps than Shift's 5px alone.
+ if (key=='d'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:1; if (mcx<sx-st-1) mcx+=st; }
+ if (key=='a'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:1; if (mcx>st) mcx-=st; }
+ if (key=='w'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:1; if (mcy>st) mcy-=st; }
+ if (key=='s'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:1; if (mcy<sy-st-1) mcy+=st; }
+ if (key=='D'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:5; if (mcx<sx-st-1) mcx+=st; }
+ if (key=='A'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:5; if (mcx>st) mcx-=st; }
+ if (key=='W'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:5; if (mcy>st) mcy-=st; }
+ if (key=='S'&&toggleProc>0) { int st=g_tab_held?CALIB_TAB_STEP:5; if (mcy<sy-st-1) mcy+=st; }
+ if (key=='\t') g_tab_held=1;
  if (key==' '&&toggleProc==2) 
  {
   fprintf(stderr,"Recorded corner %d at %f,%f\n",cornerIdx,mcx,mcy);

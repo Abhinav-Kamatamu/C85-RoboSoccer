@@ -22,7 +22,7 @@
 #include <math.h>
 #include "API/btcomm.h"
 #include "logic/ai_config.h"
-#include "clock.h"
+#include "logic/clock.h"
 
 #define LEFT_MOTOR  MOTOR_A
 #define RIGHT_MOTOR MOTOR_D
@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
         char lp = (char)lround(power + MOTOR_TRIM_L);
         char rp = (char)lround(power + MOTOR_TRIM_R);
         fprintf(stderr, "[bench_test] GO: driving straight, power=%d (L=%d R=%d with trim), for %.2fs\n", power, lp, rp, seconds);
-        BT_turn(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+        BT_turn(LEFT_MOTOR, -lp, RIGHT_MOTOR, -rp);
         usleep((useconds_t)(seconds * 1e6));
         BT_all_stop(brake);
         fprintf(stderr, "[bench_test] STOP (brake=%d)\n", brake);
@@ -110,7 +110,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[bench_test] GO: spinning in place, power=%d, for %.2fs "
                         "(right=+%d, left=-%d)\n",
                 power, seconds, power, power);
-        BT_turn(LEFT_MOTOR, (char)-power, RIGHT_MOTOR, (char)power);
+        BT_turn(LEFT_MOTOR, (char)power, RIGHT_MOTOR, (char)-power);
         usleep((useconds_t)(seconds * 1e6));
         BT_all_stop(brake);
         fprintf(stderr, "[bench_test] STOP (brake=%d)\n", brake);
@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
         double seconds = atof(argv[4]);
         int brake = argc >= 6 ? atoi(argv[5]) : 1;
         fprintf(stderr, "[bench_test] GO: driving straight, regulated speed=%d, for %.2fs\n", speed, seconds);
-        BT_turn_speed(LEFT_MOTOR, (char)speed, RIGHT_MOTOR, (char)speed);
+        BT_turn_speed(LEFT_MOTOR, (char)-speed, RIGHT_MOTOR, (char)-speed);
         usleep((useconds_t)(seconds * 1e6));
         BT_all_stop(brake);
         fprintf(stderr, "[bench_test] STOP (brake=%d)\n", brake);
@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[bench_test] GO: spinning in place, regulated speed=%d, for %.2fs "
                         "(right=+%d, left=-%d, same convention as turn)\n",
                 speed, seconds, speed, speed);
-        BT_turn_speed(LEFT_MOTOR, (char)-speed, RIGHT_MOTOR, (char)speed);
+        BT_turn_speed(LEFT_MOTOR, (char)speed, RIGHT_MOTOR, (char)-speed);
         usleep((useconds_t)(seconds * 1e6));
         BT_all_stop(brake);
         fprintf(stderr, "[bench_test] STOP (brake=%d)\n", brake);
@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
         char lp = (char)lround(power + MOTOR_TRIM_L);
         char rp = (char)lround(power + MOTOR_TRIM_R);
         fprintf(stderr, "[bench_test] GO: driving straight, power=%d (L=%d R=%d with trim). Press 'd' the instant it reaches the end...\n", power, lp, rp);
-        BT_turn(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+        BT_turn(LEFT_MOTOR, -lp, RIGHT_MOTOR, -rp);
         double t0 = maintenant();
         wait_for_key('d');
         double t1 = maintenant();
@@ -158,7 +158,7 @@ int main(int argc, char **argv) {
         int speed = atoi(argv[3]);
         int brake = argc >= 5 ? atoi(argv[4]) : 1;
         fprintf(stderr, "[bench_test] GO: driving straight, regulated speed=%d. Press 'd' the instant it reaches the end...\n", speed);
-        BT_turn_speed(LEFT_MOTOR, (char)speed, RIGHT_MOTOR, (char)speed);
+        BT_turn_speed(LEFT_MOTOR, (char)-speed, RIGHT_MOTOR, (char)-speed);
         double t0 = maintenant();
         wait_for_key('d');
         double t1 = maintenant();

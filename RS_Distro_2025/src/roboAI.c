@@ -505,7 +505,7 @@ void id_bot(struct RoboAI *ai, struct blob *blobs)
  
  track_agents(ai,blobs);		// Call the tracking function to find each agent
 
- BT_drive(LEFT_MOTOR, RIGHT_MOTOR, 30);			// Start forward motion to establish heading
+ BT_drive(LEFT_MOTOR, RIGHT_MOTOR, -30);			// Start forward motion to establish heading
                                                 // Will move for a few frames.
   
  if (ai->st.selfID==1&&ai->st.self!=NULL)

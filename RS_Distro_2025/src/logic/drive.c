@@ -97,9 +97,9 @@ void *bt_thread_fn(void *arg) {
         if (is_stop)
             BT_all_stop(brake);
         else if (use_regulated)
-            BT_turn_speed(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+            BT_turn_speed(LEFT_MOTOR, -lp, RIGHT_MOTOR, -rp);
         else
-            BT_turn(LEFT_MOTOR, lp, RIGHT_MOTOR, rp);
+            BT_turn(LEFT_MOTOR, -lp, RIGHT_MOTOR, -rp);
         double bt_dt = maintenant() * 1e3 - bt_t0;
         pthread_mutex_lock(&g_cmd.lock);
         g_bt_calls++;
@@ -186,8 +186,23 @@ void drive_set(Motion m, int use_regulated) {
         pr = limit_power_step(pr, g_last_r);
     }
 
-    pl = clampd(pl, -MAX_POWER, MAX_POWER);
-    pr = clampd(pr, -MAX_POWER, MAX_POWER);
+    // Clamp pl/pr as a PAIR, not independently. pl=translate+rotate,
+    // pr=translate-rotate, so whenever a turn is big enough that one of
+    // them would exceed MAX_POWER, independent clamping only chops that
+    // one wheel - which (since a big rotate pushes one wheel positive and
+    // the other negative) silently eats the translate contribution out of
+    // the clipped wheel while leaving the other wheel's rotate-heavy
+    // value untouched, distorting the actual v/w ratio toward pure
+    // rotation. Scaling both wheels by the same factor instead preserves
+    // the commanded ratio - this is "why forward is slow, rotation is
+    // fast": simultaneous turn+drive commands were quietly losing most of
+    // their forward component whenever the turn alone was already large.
+    double peak = fmax(fabs(pl), fabs(pr));
+    if (peak > MAX_POWER) {
+        double scale = MAX_POWER / peak;
+        pl *= scale;
+        pr *= scale;
+    }
 
     // Dedupe (don't call if values are similar to last time), but re-send
     // the identical command every RESEND_S anyway. A dropped/failed

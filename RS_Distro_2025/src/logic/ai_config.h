@@ -10,9 +10,12 @@
 #define ROBOSOCCER_AI_CONFIG_H
 
 // **** hardware ****
-#define WHEEL_TRACK_CM        12.8   // wheel-to-wheel distance, cm
-#define POWER_TO_CMPS         0.38   // open-loop power -> forward speed, cm/s per unit
-#define POWER_TO_RADPS        0.060  // open-loop power -> turn rate, rad/s per unit
+#define WHEEL_TRACK_CM        20.5   // wheel centre to wheel centre, cm
+// Un-geared bench value (0.38) scaled x3 for the 36T:12T gear train. Turn rate
+// is 2 * POWER_TO_CMPS / WHEEL_TRACK_CM.
+// NOT re-measured; the gears also cut wheel torque, so re-bench.
+#define POWER_TO_CMPS         1.14   // open-loop power -> forward speed, cm/s per unit
+#define POWER_TO_RADPS        0.111  // open-loop power -> turn rate, rad/s per unit
 #define MIN_MOVE_POWER        6      // below this, open-loop commands don't move the bot at all
 
 #define MOTOR_TRIM_L          0      // per-wheel power bias, if one side pulls
@@ -23,27 +26,45 @@
 // below this power. Below it, drive_shape_power() pulses at MIN_SPIN_POWER
 // on a cycle instead of sending a command that is too weak to even begin running. 0 disables.
 #define MIN_SPIN_POWER        85
-#define SPIN_TRANSLATE_MAX_POWER 10  // forward-power cap while spin-pulsing
+#define SPIN_TRANSLATE_MAX_POWER 4   // forward-power cap while spin-pulsing
 #define MAX_POWER_STEP_PER_FRAME 25  // open-loop rate-of-change cap per frame (anti-skid). NOT TESTED!
 
-// Regulated-speed API (BT_turn_speed) calibration.
-#define SPEED_API_TO_CMPS_GAIN   0.55  // regulated speed -> cm/s
-#define SPEED_API_TO_DEGPS_GAIN  5.133 // regulated speed -> deg/s, in-place spin
+// Regulated-speed API (BT_turn_speed) calibration. Bench numbers were taken
+// on the un-geared drivetrain; scaled x3 for the 36T(motor):12T(wheel) gear
+// train so the wheel runs 3x the motor shaft speed. The turn gain is also
+// scaled for the wheel track (12.8 -> 20.5cm). Re-bench instead of
+// re-scaling if the real behaviour doesn't match.
+#define SPEED_API_TO_CMPS_GAIN   1.65   // 0.55 bench x3 gear ratio
+#define SPEED_API_TO_DEGPS_GAIN  2.1  // 5.133 bench x3 gear ratio x 12.8/20.5
 
 // Bot footprint relative to the TRACKED POINT (uniform blob centroid).
-#define BOT_FRONT_CM          15.0   // tracked point -> prong tips
-#define BOT_REAR_CM           16.0   // tracked point -> back of bot
-#define BOT_HALF_WIDTH_CM     9.0    // half the body width
+// Measured: 26.5cm long (back -> axle 10, axle -> front 16.5, bucket included),
+// wheel centres 20.5cm apart with ~4cm outside each, so 28.5cm wide. Jersey
+// is 17.3 (front-to-back) x 5.5, starting 1cm from the back, so its centre is
+// 9.65cm from the back.
+#define BOT_FRONT_CM          16.85  // tracked point -> prong tips
+#define BOT_REAR_CM           9.65   // tracked point -> back of bot
+#define BOT_HALF_WIDTH_CM     14.25  // half the body width
 
 // **** perception; pixel -> cm (bench test 1, NOT uniform in x/y) ****
 #define PX_PER_CM_X           7.5
 #define PX_PER_CM_Y           6.3
 
 // **** field dimensions ****
-#define DEFAULT_FIELD_W_CM    170.0
-#define DEFAULT_FIELD_H_CM    115.0
+// Today's (different, non-home) field, measured in jerseys (no ruler on
+// hand): 9.3 long x 6 short, jersey front-to-back = 17.3cm (already
+// bench-measured, see BOT_FRONT_CM's comment below) -> 160.9 x 103.8.
+// Rough (jersey-count, not ruler) but real: the old 170x115 was producing
+// a heavily lopsided false wall-recovery rate (bottom wall firing on 84%
+// of all WALL_RECOVER frames in one real run, top wall 0%), which a
+// uniformly-wrong guess wouldn't do - that asymmetry is what a boundary
+// that's actually too big in the direction that never triggered looks
+// like. Re-measure properly (not by jersey count) if time allows; this
+// replaces a worse number, not a final one.
+#define DEFAULT_FIELD_W_CM    160.9
+#define DEFAULT_FIELD_H_CM    103.8
 #define DEFAULT_GOAL_WIDTH_CM 40.0
-#define DEFAULT_WALL_MARGIN_CM 18.0
+#define DEFAULT_WALL_MARGIN_CM 20.0
 // Radius of the ball
 #define BALL_RADIUS_CM        3.5
 
@@ -75,7 +96,7 @@
 
 #define ABORT_TOL_DEG         20.0  // strike aborts if heading error exceeds this
 #define STRIKE_TIMEOUT_S      3.0
-#define STRIKE_V_CMPS         30.0
+#define STRIKE_V_CMPS         100.0
 // Ball displacement since strike began that counts as "struck".
 // Usually robust to the ~0.5cm blob jitter that makes per-frame velocity
 // utterly useless at 30fps.
@@ -99,7 +120,7 @@
 #define RETRY_WAIT_S          1.0
 
 // **** wall / unstick ****
-#define WALL_RECOVER_CLEAR_MARGIN_CM 22.0  // distance from a wall that ends P_WALL_RECOVER
+#define WALL_RECOVER_CLEAR_MARGIN_CM 24.0 // distance from a wall that ends P_WALL_RECOVER
 #define WALL_RECOVER_V_CMPS   20.0
 // Only drive (fwd/rev) within this many degrees of straight at/away
 // from the wall. Beyond that, turn in place first.
@@ -121,23 +142,23 @@
 // that the bot was doing instead of converging to the target).
 // Instead, we send a pulse pulse proportional to the size of the
 // error, then stand still and re-measure before the next one.
-#define TURN_PULSE_W_RADPS    5.2    // pulse strength (>= MIN_SPIN_POWER*POWER_TO_RADPS)
+#define TURN_PULSE_W_RADPS    9.6  // pulse strength (>= MIN_SPIN_POWER*POWER_TO_RADPS)
 #define TURN_SETTLE_S         0.45   // min settle time after a pulse before re-measuring
 #define TURN_MIN_PULSE_S      0.03   // shortest pulse (~1 frame)
 #define TURN_MAX_PULSE_S      0.7    // longest pulse
-#define TURN_RATE_INIT_RADPS  4.0    // initial guess for pulse turn rate
+#define TURN_RATE_INIT_RADPS  7.5  // initial guess for pulse turn rate
 #define TURN_UNDERSHOOT       0.75   // aim each pulse at this fraction of the remaining error
-#define TURN_RATE_MAX_RADPS   15.0   // turn-rate ceiling
+#define TURN_RATE_MAX_RADPS   30.0   // turn-rate ceiling
 #define TURN_STILL_RADPS      0.6    // "stopped turning" threshold before measuring the next pulse
 #define TURN_SETTLE_MAX_S     1.0    // settle timeout even if still turning
 #define LATERAL_TURN_GAIN     0.05
-#define GOTO_V_CMPS           25.0
+#define GOTO_V_CMPS           45.0
 #define GOTO_SLOWDOWN_CM      10.0
 #define MAX_W_RADPS           4.75
 // "Bruh the ball vanished mid-strike but was already this close" will be deemed a
 // hit for now, instead of a tracking glitch, like maybe we are just hitting
 // it in a way that makes the camera unable to detect it.
-#define CLOSE_AHEAD_CM        24.0
+#define CLOSE_AHEAD_CM        26.0
 // How far past the goal line ball_in_goal() must read before
 // trusting it (used in-tandem with BALL_RADIUS_CM).
 #define GOAL_CONFIRM_MARGIN_CM 0.5
@@ -145,18 +166,18 @@
 // P_SHOT_DONE. A ball resting right at the confirm boundary flickers
 // in/out every tick from position noise.
 #define GOAL_LEAVE_CONFIRM_FRAMES 5
-#define STAGE_DIST_CM         28.0   // standoff distance behind the ball when staging
+#define STAGE_DIST_CM         30.0  // standoff distance behind the ball when staging
 #define STALL_EPS_CMPS        2.0
 // stall.h: stalled = commanded >= STALL_CMD_V_CMPS on average yet moved
 // less than STALL_SPREAD_CM over UNSTICK_STALL_S.
 #define STALL_CMD_V_CMPS      8.0
 #define STALL_SPREAD_CM       3.0
-#define MIN_WALL_STAGE_CM     14.0
+#define MIN_WALL_STAGE_CM     16.0
 // Wall RECOVERY triggers only inside this distance of a wall (heading
 // outward too). <ust be clearly smaller than DEFAULT_WALL_MARGIN_CM
 // (the staging clamp), else arriving at a staging point retriggers
 // recovery every time.
-#define WALL_TRIGGER_MARGIN_CM 14.0
+#define WALL_TRIGGER_MARGIN_CM 16.0
 // ...and only when heading points clearly OUT of the field: dot(heading,
 // inward normal) below -this (~20deg past parallel), not just "< 0".
 #define WALL_OUTWARD_DOT       0.35
@@ -164,9 +185,10 @@
 // applies to a ball actually within this of the wall.
 #define WALL_PUSH_BAND_CM      12.0
 // Staging-point clamp margins, by which end of the bot faces the wall.
-// Nose (BOT_FRONT_CM) must stay fully on the table, tail (BOT_REAR_CM)
-// can hang over a bit when facing inward.
-#define WALL_NOSE_MARGIN_CM    18.0
+// Nose (BOT_FRONT_CM) must stay fully on the table. The tail margin also
+// applies to side walls when facing along them, where it is currently 2.25cm
+// short of BOT_HALF_WIDTH_CM: raising it scored worse in simulation.
+#define WALL_NOSE_MARGIN_CM    20.0
 #define WALL_TAIL_MARGIN_CM    12.0
 #define WALL_TRIGGER_MARGIN_BALLWALL_CM 10.0  // looser trigger when the ball itself is near a wall
 // While travelling to/aligning at a staging point, the trigger must sit
@@ -180,8 +202,8 @@
 // Route around the ball to a staging point. If the straight path passes
 // within AVOID_BLOCK_CM of the ball, detour via a point AVOID_CLEAR_CM
 // to the side.
-#define AVOID_BLOCK_CM        17.0
-#define AVOID_CLEAR_CM        34.0
+#define AVOID_BLOCK_CM        18.5
+#define AVOID_CLEAR_CM        36.0
 // Min speed to trust velocity for per-frame heading-sign disambiguation
 // (blob shape axis can flip 180). Below this, trust last-known-good.
 #define HEADING_SIGN_TRUST_CMPS 5.0
@@ -202,18 +224,18 @@
 // velocity in an arbitrary direction, which used to flip heading 180deg
 // every few frames.
 #define HEADING_CMD_V_MIN_CMPS 8.0
-#define CHASE_EDGE_MARGIN_CM   16.0  // chase never steers closer to a wall than this
+#define CHASE_EDGE_MARGIN_CM   15.0  // chase never steers closer to a wall than this
 // In chase, don't wall-recover while the ball is within ENGAGE_BALL_CM and
 // ENGAGE_BALL_DEG of dead ahead unless within HARD_WALL_MARGIN_CM of the edge.
-#define ENGAGE_BALL_CM         24.0
+#define ENGAGE_BALL_CM         26.0
 // Ball in the pouch. Control gently (CARRY_GAIN_SCALE of normal gain, and no
 // correction inside CARRY_DEADBAND_DEG). full-gain steering on the
 // pouch kept swinging the ball sideways instead of carrying it.
-#define CARRY_DIST_CM          16.0
+#define CARRY_DIST_CM          22.0
 #define CARRY_GAIN_SCALE       0.5
 #define CARRY_DEADBAND_DEG     8.0
 #define ENGAGE_BALL_DEG        60.0
-#define HARD_WALL_MARGIN_CM    10.0
+#define HARD_WALL_MARGIN_CM    12.0
 
 // **** soccer mode (intercept/clear/mark) ****** no bench data
 // behind any of these yet, legit js guesses to be tuned once wired up ****
@@ -237,13 +259,43 @@
 // ball.vel along ball->own_goal) => skill_intercept instead of skill_mark.
 #define BALL_APPROACH_SPEED_CMPS 15.0
 
+// **** opponent avoidance (mode_soccer) ****
+// Path-detour trigger/clearance for routing S_ATTACK's steering target
+// around the opponent, same plan_avoid_point() already used to route
+// around the ball. Sized off BOT_HALF_WIDTH_CM since the obstacle here is
+// a whole second robot body, not the ball.
+#define OPP_AVOID_BLOCK_CM    (BOT_HALF_WIDTH_CM * 2.0 + 6.0)
+#define OPP_AVOID_CLEAR_CM    50.0
+// Unconditional safety net, applied after EVERY state's run() regardless
+// of what it decided to do (see .local/notes/06-opponent-and-testing.md:
+// "safety rules do not depend on the model being right"). Inside this
+// distance, with the opponent roughly ahead, cap forward speed instead of
+// trusting the steering/detour above to have already handled it.
+#define OPP_DANGER_CM         (BOT_HALF_WIDTH_CM * 2.0 + 10.0)
+#define OPP_DANGER_DEG        45.0
+#define OPP_BACKOFF_V_CMPS    8.0
+
+// S_ATTACK-only capture taper. skill_chase() has no distance-based
+// slowdown at all - its only speed reduction is cos(heading error), so
+// once reasonably aimed it drives at full GOTO_V_CMPS right through
+// contact (confirmed in a real log: v stayed pinned at ~45 cm/s all the
+// way from 23cm to 19cm from the ball) - a kick, not a controlled touch
+// into the pouch. Not fixed inside skill_chase() itself: mode_chase's own
+// doc comment says "we consider contact to be the kick", so a hard hit is
+// that mode's actual intent, not a bug to share a fix with. This tapers
+// S_ATTACK's own speed only, once within BALL_CAPTURE_DIST_CM of the
+// BALL itself - not of whatever aim point it's steering at, which can be
+// STRIKE_CARROT_CM beyond the ball.
+#define BALL_CAPTURE_DIST_CM    25.0
+#define BALL_CAPTURE_MIN_V_FRAC 0.45
+
 // **** logging ****
 // 1: every adapter frame appends a line to positions_<col>_<mode>.log (all
 // agents, raw blob data, motion, wheel powers, plan). 0: no log file is opened
 // or written, and none of the formatting work is done. You can override from the
 // command line with -DENABLE_FRAME_LOG=0, or edit the constant here.
 #ifndef ENABLE_FRAME_LOG
-#define ENABLE_FRAME_LOG      0
+#define ENABLE_FRAME_LOG      1
 #endif
 
 #endif

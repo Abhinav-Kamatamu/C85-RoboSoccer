@@ -49,6 +49,6 @@
 // Pixels at/above this on any channel are treated as clipped/saturated
 // (a highlight, for example, the ball's top bright spot) and excluded
 // from the calibration average instead of dragging it toward white.
-#define CAL_CLIP_THRESH    250
+#define CAL_CLIP_THRESH    2500
 
 #endif

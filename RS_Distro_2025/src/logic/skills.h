@@ -21,6 +21,12 @@
 // clamp function for doubles
 double clampd(double v, double lo, double hi);
 
+// Signed heading error (radians) between self's current heading and the
+// bearing from self to `target`. Has external linkage (every skill here
+// uses it) but was missing its own prototype; add any new caller's
+// include here instead of relying on implicit declaration.
+double heading_err_rad(const World *w, Vec2 target);
+
 // Drive toward `target`. DONE once within STAGE_TOL_CM. resetting (pass the
 // g_entered/first-frame flag) clears the antipodal turn-direction
 // commitment.

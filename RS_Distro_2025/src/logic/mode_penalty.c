@@ -210,8 +210,17 @@ SkillStatus run_strike(World *w, Motion *out) {
 
 int next_strike(World *w, SkillStatus s, double t) {
     (void)w;
+    // One kick, one contact - no P_FOLLOW_THROUGH. P_LOST was tried here
+    // first (it also just holds still), but it skips P_SHOT_DONE
+    // entirely, which means ball_in_goal() never gets checked and a
+    // missed kick never replans another attempt - it just sits there
+    // until self/ball happen to drop out of tracking long enough to
+    // reset. P_SHOT_DONE's run() is the same skill_hold() stop, but its
+    // next() still confirms the goal and replans via P_GOTO_STAGING if
+    // the ball came to rest outside it - exactly "one kick" without
+    // losing goal detection.
     if (s == SKILL_DONE)
-        return P_FOLLOW_THROUGH;
+        return P_SHOT_DONE;
     if (s == SKILL_FAILED || t > STRIKE_TIMEOUT_S)
         return P_REPOSITION;
     return P_STRIKE;
@@ -421,7 +430,13 @@ int penalty_check_preempt(int state, const World *w, double now) {
         } else {
             wall_margin = last_wall_margin;
         }
-        if (near_wall(w->self.pos, w->field_min, w->field_max, wall_margin)) {
+        // Both goals sit ON the end walls, so driving in to score (P_STRIKE
+        // isn't excluded above the way P_FOLLOW_THROUGH is) necessarily
+        // looks like "near wall, heading outward" - skip the trigger at
+        // the goal mouth specifically, same margin as the real check below.
+        if (near_wall(w->self.pos, w->field_min, w->field_max, wall_margin) &&
+            !near_goal_mouth(w->self.pos, wall_margin, w->field_min,
+                             w->field_max, w->own_goal, w->their_goal, w->goal_width_cm)) {
             Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
             if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
                 return P_WALL_RECOVER; // heading clearly outward

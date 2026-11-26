@@ -49,6 +49,13 @@ Vec2 plan_defend_point(Vec2 threat_pos, Vec2 own_goal, double stand_dist,
 
 // True if `pos` is within `margin` of any field edge.
 int near_wall(Vec2 pos, Vec2 field_min, Vec2 field_max, double margin);
+// True if pos is at an end wall AND within the goal mouth there - driving
+// toward a goal to score necessarily looks like "near wall, heading
+// outward" to near_wall()/direction_away_from_nearest_wall(); callers
+// should skip wall-recovery here, not treat scoring as a hazard.
+int near_goal_mouth(Vec2 pos, double wall_margin, Vec2 field_min,
+                     Vec2 field_max, Vec2 own_goal, Vec2 their_goal,
+                     double goal_width_cm);
 
 // Finds whichever of the 4 walls pos is closest to, and returns the unit
 // vector pointing away from that wall, back toward the field's interior.

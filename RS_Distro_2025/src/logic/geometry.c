@@ -73,6 +73,24 @@ int near_wall(Vec2 pos, Vec2 field_min, Vec2 field_max, double margin) {
            pos.y < field_min.y + margin || pos.y > field_max.y - margin;
 }
 
+// Both goals sit ON the end walls, so driving in to score necessarily
+// means being right at the x-boundary near_wall() flags - this is the
+// one place on a wall where heading "outward" is correct, not a hazard,
+// and no state should wall-recover there. Checks x is near either end
+// wall AND y is within the goal mouth at that end - a wall-trigger
+// elsewhere along the same end wall (outside the goal width) still
+// counts as a real wall.
+int near_goal_mouth(const Vec2 pos, double wall_margin, Vec2 field_min,
+                     Vec2 field_max, Vec2 own_goal, Vec2 their_goal,
+                     double goal_width_cm) {
+    int at_end_wall = pos.x < field_min.x + wall_margin ||
+                       pos.x > field_max.x - wall_margin;
+    if (!at_end_wall)
+        return 0;
+    double half = goal_width_cm / 2.0;
+    return fabs(pos.y - own_goal.y) < half || fabs(pos.y - their_goal.y) < half;
+}
+
 typedef struct {
     double left, right, top, bottom;
 } WallDists;
