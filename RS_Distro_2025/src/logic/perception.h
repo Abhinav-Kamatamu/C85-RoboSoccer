@@ -39,12 +39,11 @@ void world_from_ai(struct RoboAI *ai, int sx, int sy, double now, World *out);
 void world_log_frame(struct RoboAI *ai, int own_col, int ai_mode, int state,
                       const World *w, Motion motion, Vec2 staging, Vec2 aim);
 
-// Use this in the adapters instead of calling world_log_frame() directly, so
-// the whole log can be switched off with ENABLE_FRAME_LOG (ai_config.h).
-#if ENABLE_FRAME_LOG
+// Use this in the adapters instead of calling world_log_frame() directly.
+// The human-readable positions log is written when ENABLE_FRAME_LOG
+// (ai_config.h) is on OR the run log is on (logItems bit0, see runlog.h);
+// the run log's frames.jsonl is fed from the same call. With both off it
+// returns straight away.
 #define WORLD_LOG_FRAME(...) world_log_frame(__VA_ARGS__)
-#else
-#define WORLD_LOG_FRAME(...) ((void)0)
-#endif
 
 #endif

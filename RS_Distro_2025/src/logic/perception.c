@@ -4,8 +4,10 @@
 #include "geometry.h"
 #include "gyro.h"
 #include "drive.h"
+#include "runlog.h"
 #include <math.h>
 #include <stdio.h>
+#include <unistd.h>
 
 static double g_last_cmd_v = 0;
 void perception_set_last_cmd_v(double v) { g_last_cmd_v = v; }
@@ -169,18 +171,49 @@ void fprint_blob(FILE *f, const char *tag, struct blob *b) {
 
 void world_log_frame(struct RoboAI *ai, int own_col, int ai_mode, int state,
                       const World *w, Motion motion, Vec2 staging, Vec2 aim) {
+    // Same frame, two readers: frames.jsonl for an AI (runlog.c) and the
+    // human-readable line below. Both come from these exact values.
+    if (runlog_items()) {
+        double raw[12] = {
+            ai->st.sdx, ai->st.sdy, ai->st.smx, ai->st.smy,
+            ai->st.odx, ai->st.ody, ai->st.omx, ai->st.omy,
+            ai->st.bdx, ai->st.bdy, ai->st.bmx, ai->st.bmy,
+        };
+        double pl, pr;
+        drive_get_last_power(&pl, &pr);
+        runlog_frame_ai(state, w, motion, staging, aim, pl, pr, raw,
+                        ai->st.self ? ai->st.self->blobId : -1,
+                        ai->st.opp ? ai->st.opp->blobId : -1,
+                        ai->st.ball ? ai->st.ball->blobId : -1);
+    }
+    if (!ENABLE_FRAME_LOG && !(runlog_items() & RUNLOG_TEXT))
+        return;
+
     static FILE *f = NULL;
     static int opened = 0;
     if (!opened) {
         opened = 1;
         char fname[64];
         snprintf(fname, sizeof(fname), "positions_%d_%d.log", own_col, ai_mode);
-        f = fopen(fname, "w");
+        if (runlog_dir()) {
+            // Lives in the run folder now; the old name in the launch folder
+            // becomes a link to it so `tail -f positions_<col>_<mode>.log` still works.
+            char path[1400];
+            snprintf(path, sizeof(path), "%s/positions.log", runlog_dir());
+            f = fopen(path, "w");
+            unlink(fname);
+            if (f && symlink(path, fname) != 0)
+                fprintf(stderr, "world_log_frame(): could not link %s -> %s\n", fname, path);
+            snprintf(fname, sizeof(fname), "%s", "positions.log");
+        } else {
+            f = fopen(fname, "w");
+        }
         if (!f) {
             fprintf(stderr, "world_log_frame(): could not open %s for writing\n", fname);
             return;
         }
-        fprintf(stderr, "Logging per-frame object positions to %s\n", fname);
+        fprintf(stderr, "Logging per-frame object positions to %s\n",
+                runlog_dir() ? "<run folder>/positions.log" : fname);
     }
     if (!f) return;
 

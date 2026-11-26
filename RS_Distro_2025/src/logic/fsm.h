@@ -38,4 +38,18 @@ const StateDef *fsm_find(const StateDef *table, int count, int id);
 void fsm_log_transition(const StateDef *table, int count, int from_id, int to_id,
                          double now, const char *reason);
 
+// Say WHY the FSM is about to move to `to_id`. Put it on its own line right
+// before the `return to_id;` (or before a one-line `if (...) return to_id;`):
+//     fsm_reason(P_REPOSITION, "align timeout %.1fs > %.1fs", t, ALIGN_TIMEOUT_S);
+// fsm_log_transition() uses it if the transition it logs goes to `to_id`;
+// otherwise it falls back to the generic "state"/"pre-empt". The latest call
+// wins, so a reason set before an `if` that doesn't fire is overwritten by the
+// next return's own reason. The reason also lands in the run log
+// (transitions.jsonl, see runlog.h) so a human or an AI can see the cause.
+void fsm_reason(int to_id, const char *fmt, ...);
+
+// Forget any pending reason. Each mode's fsm_step calls this once per frame
+// (top of the step, and again right before `next()`).
+void fsm_reason_clear(void);
+
 #endif
