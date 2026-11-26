@@ -31,6 +31,7 @@
 #include "roboAI.h"			// <--- Look at this header file!
 #include "logic/mode_penalty.h"
 #include "logic/mode_chase.h"
+#include "logic/mode_soccer.h"
 extern int sx;              // Get access to the image size from the imageCapture module
 extern int sy;
 extern char coloursFile[256]; // Whatever calibration file imageCapture.c actually loaded
@@ -777,16 +778,12 @@ void AI_main(struct RoboAI *ai, struct blob *blobs, void *state)
    state transitions and with calling the appropriate function based on what
    the bot is supposed to be doing.
   *****************************************************************************/
-  if (ai->st.state>=101 && ai->st.state<200)
-  {
-   mode_penalty_step(ai, blobs);
-  }
-  else if (ai->st.state>=201 && ai->st.state<300)
-  {
-   mode_chase_step(ai, blobs);
-  }
-  // TODO: mode_soccer_step() goes here once that mode exists,
-  // same dispatch pattern (state range -> one function call).
+  if (ai->st.state >= 101 && ai->st.state < 200)
+    mode_penalty_step(ai, blobs);
+  else if (ai->st.state >= 201 && ai->st.state < 300)
+    mode_chase_step(ai, blobs);
+  else if (ai->st.state >= 1 && ai->st.state < 100)
+    mode_soccer_step(ai, blobs);
 //  fprintf(stderr,"Just trackin'!\n");	// bot, opponent, and ball.
 //  track_agents(ai,blobs);		// Currently, does nothing but endlessly track
  }

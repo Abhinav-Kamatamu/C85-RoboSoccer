@@ -58,4 +58,23 @@ SkillStatus skill_leave_wall(const World *w, Motion *out, int reset);
 // reset=1 on the frame you enter UNSTICK.
 SkillStatus skill_unstick(const World *w, int reset, Motion *out);
 
+// Steer at where the ball will be shortly (extrapolated from its current
+// velocity), not where it is right now for cutting off a moving ball
+// instead of always chasing one step behind it. Always RUNNING; holds
+// still if the ball isn't currently visible.
+SkillStatus skill_intercept(const World *w, int reset, Motion *out);
+
+// Cheap, low-precision "get the ball away from our own goal right now."
+// Unlike skill_strike this doesn't need to be carefully aimed first,
+// it aims directly away from own_goal through the ball, with a much more
+// forgiving abort tolerance, prioritizing speed over where it ends up.
+// FAILED if the ball isn't visible or the angle's too far off; DONE once
+// the ball's visibly moved.
+SkillStatus skill_clear(const World *w, int reset, Motion *out);
+
+// Defensive blocking; stand between the opponent and our own goal
+// (plan_defend_point()) instead of going to meet them. Always RUNNING;
+// holds still if the opponent isn't currently visible.
+SkillStatus skill_mark(const World *w, int reset, Motion *out);
+
 #endif

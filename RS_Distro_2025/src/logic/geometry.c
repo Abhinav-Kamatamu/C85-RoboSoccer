@@ -138,6 +138,18 @@ Vec2 plan_waypoint(
     return clamp_to_field(staging, field_min, field_max, margin);
 }
 
+Vec2 plan_defend_point(
+    Vec2 threat_pos, Vec2 own_goal, double stand_dist,
+    Vec2 field_min, Vec2 field_max, double margin
+) {
+    Vec2 toward = vec2_normalize(vec2_sub(threat_pos, own_goal));
+    // If the threat is sitting right on our own goal.
+    if (toward.x == 0 && toward.y == 0)
+        toward.x = 1;
+    Vec2 stand = vec2_add(own_goal, vec2_scale(toward, stand_dist));
+    return clamp_to_field(stand, field_min, field_max, margin);
+}
+
 // A staging point is always "push the ball further away from wherever
 // we're aiming." If the ball is already sitting on the boundary, that
 // pushes the staging point beyond the wall no matter which interior

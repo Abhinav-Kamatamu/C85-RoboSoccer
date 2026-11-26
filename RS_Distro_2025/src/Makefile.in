@@ -113,7 +113,9 @@ am_roboSoccer_OBJECTS = roboSoccer.$(OBJEXT) \
 	logic/fsm.$(OBJEXT) logic/perception.$(OBJEXT) \
 	logic/mode_penalty.$(OBJEXT) \
 	logic/mode_penalty_adapter.$(OBJEXT) logic/gyro.$(OBJEXT) \
-	logic/mode_chase.$(OBJEXT) logic/mode_chase_adapter.$(OBJEXT)
+	logic/mode_chase.$(OBJEXT) logic/mode_chase_adapter.$(OBJEXT) \
+	logic/mode_soccer.$(OBJEXT) \
+	logic/mode_soccer_adapter.$(OBJEXT)
 roboSoccer_OBJECTS = $(am_roboSoccer_OBJECTS)
 roboSoccer_LDADD = $(LDADD)
 AM_V_P = $(am__v_P_@AM_V@)
@@ -144,6 +146,8 @@ am__depfiles_remade = ./$(DEPDIR)/roboAI.Po ./$(DEPDIR)/roboSoccer.Po \
 	logic/$(DEPDIR)/mode_chase_adapter.Po \
 	logic/$(DEPDIR)/mode_penalty.Po \
 	logic/$(DEPDIR)/mode_penalty_adapter.Po \
+	logic/$(DEPDIR)/mode_soccer.Po \
+	logic/$(DEPDIR)/mode_soccer_adapter.Po \
 	logic/$(DEPDIR)/perception.Po logic/$(DEPDIR)/skills.Po
 am__mv = mv -f
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
@@ -287,7 +291,8 @@ top_srcdir = @top_srcdir@
 roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avilib.c imagecapture/color.c imagecapture/gui.c imagecapture/imageProc.c imagecapture/svdDynamic.c imagecapture/utils.c imagecapture/v4l2uvc.c \
 			API/btcomm.c roboAI.c \
 			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c logic/mode_penalty_adapter.c logic/gyro.c \
-			logic/mode_chase.c logic/mode_chase_adapter.c
+			logic/mode_chase.c logic/mode_chase_adapter.c \
+			logic/mode_soccer.c logic/mode_soccer_adapter.c
 
 AM_CPPFLAGS = -fpermissive
 # OpenMP: the vision code (fieldUnwarp2, bgSubtract3, display copy, imageProc)
@@ -428,6 +433,10 @@ logic/mode_chase.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
 logic/mode_chase_adapter.$(OBJEXT): logic/$(am__dirstamp) \
 	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_soccer.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
+logic/mode_soccer_adapter.$(OBJEXT): logic/$(am__dirstamp) \
+	logic/$(DEPDIR)/$(am__dirstamp)
 
 roboSoccer$(EXEEXT): $(roboSoccer_OBJECTS) $(roboSoccer_DEPENDENCIES) $(EXTRA_roboSoccer_DEPENDENCIES) 
 	@rm -f roboSoccer$(EXEEXT)
@@ -461,6 +470,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_chase_adapter.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_penalty.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_penalty_adapter.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_soccer.Po@am__quote@ # am--include-marker
+@AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/mode_soccer_adapter.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/perception.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@logic/$(DEPDIR)/skills.Po@am__quote@ # am--include-marker
 
@@ -637,6 +648,8 @@ distclean: distclean-am
 	-rm -f logic/$(DEPDIR)/mode_chase_adapter.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
+	-rm -f logic/$(DEPDIR)/mode_soccer.Po
+	-rm -f logic/$(DEPDIR)/mode_soccer_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po
 	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile
@@ -703,6 +716,8 @@ maintainer-clean: maintainer-clean-am
 	-rm -f logic/$(DEPDIR)/mode_chase_adapter.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty.Po
 	-rm -f logic/$(DEPDIR)/mode_penalty_adapter.Po
+	-rm -f logic/$(DEPDIR)/mode_soccer.Po
+	-rm -f logic/$(DEPDIR)/mode_soccer_adapter.Po
 	-rm -f logic/$(DEPDIR)/perception.Po
 	-rm -f logic/$(DEPDIR)/skills.Po
 	-rm -f Makefile

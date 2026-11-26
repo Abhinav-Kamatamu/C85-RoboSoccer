@@ -2,7 +2,8 @@ bin_PROGRAMS = roboSoccer
 roboSoccer_SOURCES = roboSoccer.c imagecapture/imageCapture.c imagecapture/avilib.c imagecapture/color.c imagecapture/gui.c imagecapture/imageProc.c imagecapture/svdDynamic.c imagecapture/utils.c imagecapture/v4l2uvc.c \
 			API/btcomm.c roboAI.c \
 			logic/geometry.c logic/skills.c logic/drive.c logic/fsm.c logic/perception.c logic/mode_penalty.c logic/mode_penalty_adapter.c logic/gyro.c \
-			logic/mode_chase.c logic/mode_chase_adapter.c
+			logic/mode_chase.c logic/mode_chase_adapter.c \
+			logic/mode_soccer.c logic/mode_soccer_adapter.c
 CC=g++
 AM_CPPFLAGS=-fpermissive
 # OpenMP: the vision code (fieldUnwarp2, bgSubtract3, display copy, imageProc)

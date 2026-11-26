@@ -215,6 +215,28 @@
 #define ENGAGE_BALL_DEG        60.0
 #define HARD_WALL_MARGIN_CM    10.0
 
+// **** soccer mode (intercept/clear/mark) ****** no bench data
+// behind any of these yet, legit js guesses to be tuned once wired up ****
+
+// How far ahead in time skill_intercept extrapolates the ball's position
+// (lead = ball.pos + ball.vel * this), instead of chasing where it
+// already was. Don't make it too long or a fast ball's lead point will be
+// off the field.
+#define INTERCEPT_LEAD_S       0.4
+// skill_clear aborts like skill_strike does, but much more forgiving.
+// clearing prioritizes getting the ball away NOW over aiming it well, so
+// it shouldn't bail just because it isn't lined up perfectly.
+#define CLEAR_ABORT_TOL_DEG    60.0
+// How far in front of own_goal skill_mark stands while shadowing the
+// opponent
+#define MARK_STAND_DIST_CM     40.0
+// mode_soccer: ball within this of own_goal => skill_clear (urgent),
+// regardless of anything else.
+#define DEFEND_DANGER_DIST_CM  40.0
+// mode_soccer: ball moving toward own_goal faster than this (component of
+// ball.vel along ball->own_goal) => skill_intercept instead of skill_mark.
+#define BALL_APPROACH_SPEED_CMPS 15.0
+
 // **** logging ****
 // 1: every adapter frame appends a line to positions_<col>_<mode>.log (all
 // agents, raw blob data, motion, wheel powers, plan). 0: no log file is opened

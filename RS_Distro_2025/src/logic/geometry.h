@@ -39,6 +39,14 @@ Vec2 clamp_to_field(Vec2 p, Vec2 field_min, Vec2 field_max, double margin);
 Vec2 plan_waypoint(Vec2 ball_pos, Vec2 aim_target, double stage_dist,
                     Vec2 field_min, Vec2 field_max, double margin);
 
+// A point `stand_dist` cm from own_goal, toward whatever threat_pos is
+// (the ball, or the opponent) i.e. standing between the threat and our
+// own goal instead of going to meet it directly. Used for defensive
+// positioning (skill_mark and friends), mirrors plan_waypoint()'s
+// clamp-to-field safety net.
+Vec2 plan_defend_point(Vec2 threat_pos, Vec2 own_goal, double stand_dist,
+                        Vec2 field_min, Vec2 field_max, double margin);
+
 // True if `pos` is within `margin` of any field edge.
 int near_wall(Vec2 pos, Vec2 field_min, Vec2 field_max, double margin);
 

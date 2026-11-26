@@ -118,7 +118,7 @@ int got_Y=0;				                    // Got Y adjustment
 /*********************************************************************
 Image processing setup and frame processing loop
 **********************************************************************/
-int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode, const char *coloursCalFile)
+int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode, const char *coloursCalFile, int logItems)
 {
  ///////////////////////////////////////////////////////////////////////////////////
  //
@@ -131,6 +131,12 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode,
  //	- own_col: Color of the bot controlled by this program (passed on from command line)
  //	- AI_mode: Penalties, Follow the Ball, or Robo-Soccer (passed on from command line)
  //	- coloursCalFile: NULL for colours.dat, or a specific calibration file to use instead
+ // - logItems: 0 if you don't want any logging. last bit set if you want .log file, 2nd last
+ //             bit set if you want to record frames from the display that shows during the game
+ //             (red, blue, ball, bounding box), third last bit set if you want to record frames
+ //             from the actual camera. All files stored in
+ //             .local/logs/<timestamp>/{world.log, processed/<timestamp>.jpg camera/<timestamp>.jpg }
+ //             TODO: Make this NOT REDUCE 30fps and (hopefully) not use gigabytes of storage!
  //
  // This function performs the following tasks:
  //  - Initializes the webcam and opens the video input device

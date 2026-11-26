@@ -499,3 +499,94 @@ SkillStatus skill_unstick(const World *w, int reset, Motion *out) {
     }
     return SKILL_RUNNING;
 }
+
+SkillStatus skill_intercept(const World *w, int reset, Motion *out) {
+    static double committed_sign = 1.0;
+    if (reset) committed_sign = 1.0;
+
+    if (!w->ball.valid) {
+        out->v = 0;
+        out->w = 0;
+        return SKILL_RUNNING;
+    }
+
+    // We calculate where the ball will be shortly, instead of where it is now.
+    // We clamp the coordinates to the field so a fast ball heading for a wall doesn't
+    // send us chasing a point off the grid.
+    Vec2 lead = vec2_add(w->ball.pos, vec2_scale(w->ball.vel, INTERCEPT_LEAD_S));
+    lead = clamp_to_field(lead, w->field_min, w->field_max, 0.0);
+
+    // Same continuous drive-and-steer shape as skill_chase. There is no idea of having
+    // "arrived", the mode decides when to stop intercepting.
+    double err_rad = stabilize_turn_sign(heading_err_rad(w, lead), &committed_sign);
+    double w_cmd = clampd(HEADING_TURN_GAIN * err_rad, -MAX_W_RADPS, MAX_W_RADPS);
+    double v_cmd = GOTO_V_CMPS * (0.5 + 0.5 * cos(err_rad));
+    out->v = v_cmd;
+    out->w = w_cmd;
+    return SKILL_RUNNING;
+}
+
+SkillStatus skill_clear(const World *w, int reset, Motion *out) {
+    static Vec2 ball_start = {0, 0};
+    static int have_start = 0;
+
+    if (reset)
+        have_start = 0;
+
+    if (!w->ball.valid) {
+        out->v = 0;
+        out->w = 0;
+        return SKILL_FAILED;
+    }
+    if (!have_start) {
+        ball_start = w->ball.pos;
+        have_start = 1;
+    }
+
+    // Aim AWAY from our own goal through the ball. This is meant to be a cheap and low-precision
+    // direction instead of a carefully aligned aimed shot like skill_strike's steer_to.
+    Vec2 away = vec2_normalize(vec2_sub(w->ball.pos, w->own_goal));
+    if (away.x == 0 && away.y == 0)
+        away.x = 1; // ball sitting right on own_goal
+    Vec2 steer_to = vec2_add(w->ball.pos, vec2_scale(away, STRIKE_CARROT_CM));
+
+    double err_deg = rad_to_deg(heading_err_rad(w, steer_to));
+    if (fabs(err_deg) > CLEAR_ABORT_TOL_DEG) {
+        out->v = 0;
+        out->w = 0;
+        return SKILL_FAILED;
+    }
+
+    // Struck => the ball has definently moved from where it sat when we began
+    // Although maybe we should use a different constant, because we might not be
+    // aligned and thus we knock it out only a bit.
+    if (vec2_dist(w->ball.pos, ball_start) > STRIKE_MOVED_CM) {
+        out->v = 0;
+        out->w = 0;
+        return SKILL_DONE;
+    }
+
+    out->v = STRIKE_V_CMPS;
+    out->w = clampd(HEADING_TURN_GAIN * deg_to_rad(err_deg), -MAX_W_RADPS, MAX_W_RADPS);
+    return SKILL_RUNNING;
+}
+
+SkillStatus skill_mark(const World *w, int reset, Motion *out) {
+    if (!w->opp.valid) {
+        out->v = 0;
+        out->w = 0;
+        return SKILL_RUNNING;
+    }
+    // We stand between the opponent and our own goal instead of going to
+    // meet the opponent. re-plans whenever the
+    // target moves more than 1cm since the opponent moves every frame,
+    // this just keeps re-engaging it, which is continuous shadowing. We ignore
+    // its SKILL_DONE, marking has no "finished", the mode decides when
+    // to stop.
+    Vec2 defend_pt = plan_defend_point(
+        w->opp.pos, w->own_goal, MARK_STAND_DIST_CM,
+        w->field_min, w->field_max, DEFAULT_WALL_MARGIN_CM
+    );
+    skill_goto(w, defend_pt, reset, out);
+    return SKILL_RUNNING;
+}
