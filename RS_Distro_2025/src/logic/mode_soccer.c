@@ -46,6 +46,7 @@ static int next_ready(World *w, SkillStatus s, double t) {
     if (frames < READY_FRAMES)
         return S_READY;
     frames = 0;
+    fsm_reason(should_defend(w) ? S_DEFEND : S_ATTACK, "%sball %.1f cm from own goal vs %.1f cm from theirs", "self and ball seen for READY_FRAMES; ", w->ball.valid ? vec2_dist(w->ball.pos, w->own_goal) : -1.0, w->ball.valid ? vec2_dist(w->ball.pos, w->their_goal) : -1.0);
     return should_defend(w) ? S_DEFEND : S_ATTACK;
 }
 
@@ -77,6 +78,7 @@ static int next_attack(World *w, SkillStatus s, double t) {
     // noise, or the ball bouncing off something during the shot itself).
     if (penalty_sub_state == P_STRIKE || penalty_sub_state == P_FOLLOW_THROUGH)
         return S_ATTACK;
+    fsm_reason(should_defend(w) ? S_DEFEND : S_ATTACK, "%sball %.1f cm from own goal vs %.1f cm from theirs", "ball switched halves: ", w->ball.valid ? vec2_dist(w->ball.pos, w->own_goal) : -1.0, w->ball.valid ? vec2_dist(w->ball.pos, w->their_goal) : -1.0);
     return should_defend(w) ? S_DEFEND : S_ATTACK;
 }
 
@@ -97,6 +99,7 @@ static SkillStatus run_defend(World *w, Motion *out) {
 static int next_defend(World *w, SkillStatus s, double t) {
     (void)s;
     (void)t;
+    fsm_reason(should_defend(w) ? S_DEFEND : S_ATTACK, "%sball %.1f cm from own goal vs %.1f cm from theirs", "ball switched halves: ", w->ball.valid ? vec2_dist(w->ball.pos, w->own_goal) : -1.0, w->ball.valid ? vec2_dist(w->ball.pos, w->their_goal) : -1.0);
     return should_defend(w) ? S_DEFEND : S_ATTACK;
 }
 
@@ -108,6 +111,7 @@ static SkillStatus run_wall_recover(World *w, Motion *out) {
 static int next_wall_recover(World *w, SkillStatus s, double t) {
     (void)w;
     (void)t;
+    fsm_reason(S_DEFEND, "left the wall (%.1f cm from nearest wall)", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max));
     return (s == SKILL_DONE) ? S_DEFEND : S_WALL_RECOVER;
 }
 
@@ -118,6 +122,7 @@ static SkillStatus run_unstick(World *w, Motion *out) {
 static int next_unstick(World *w, SkillStatus s, double t) {
     (void)w;
     (void)s;
+    fsm_reason(S_DEFEND, "unstick reverse+turn cycle done (%.1fs)", t);
     if (t >= UNSTICK_REVERSE_S + UNSTICK_TURN_S)
         return S_DEFEND;
     return S_UNSTICK;
@@ -140,6 +145,7 @@ static int next_lost(World *w, SkillStatus s, double t) {
             frames = 0;
     }
     if (frames >= READY_FRAMES) {
+        fsm_reason(S_READY, "self and ball seen again for %d frames (READY_FRAMES %d)", frames, READY_FRAMES);
         frames = 0;
         return S_READY;
     }
@@ -169,6 +175,7 @@ static int soccer_check_preempt(int state, const World *w, double now) {
     if (state != S_WALL_RECOVER && w->self.valid) {
         if (near_wall(w->self.pos, w->field_min, w->field_max, WALL_TRIGGER_MARGIN_CM)) {
             Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
+            fsm_reason(S_WALL_RECOVER, "%.1f cm from a wall (WALL_TRIGGER_MARGIN_CM %.1f) and heading outward: dot %.2f < -WALL_OUTWARD_DOT %.2f", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max), WALL_TRIGGER_MARGIN_CM, vec2_dot(w->self.heading, in), WALL_OUTWARD_DOT);
             if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
                 return S_WALL_RECOVER;
         }
@@ -182,6 +189,7 @@ static int soccer_check_preempt(int state, const World *w, double now) {
     int stalled = stall_update(&stall, now, w->self.pos,
                                w->self.valid && !stationary_state, g_last_cmd_v);
     if (stalled && state != S_UNSTICK) {
+        fsm_reason(S_UNSTICK, "stalled: driving for UNSTICK_STALL_S %.1fs but barely moved (last cmd v %.1f cm/s)", UNSTICK_STALL_S, g_last_cmd_v);
         stall_reset(&stall);
         return S_UNSTICK;
     }
@@ -189,6 +197,7 @@ static int soccer_check_preempt(int state, const World *w, double now) {
     if (state != S_LOST &&
         ((w->self.valid == 0 && w->self.lost_frames > LOST_FRAMES) ||
          (w->ball.valid == 0 && w->ball.lost_frames > BALL_LOST_FRAMES))) {
+        fsm_reason(S_LOST, "not seen: self lost_frames %d (LOST_FRAMES %d), ball lost_frames %d (BALL_LOST_FRAMES %d)", w->self.lost_frames, LOST_FRAMES, w->ball.lost_frames, BALL_LOST_FRAMES);
         return S_LOST;
     }
 
@@ -199,6 +208,7 @@ static int prev_state = -1;
 static double t_entered = 0;
 
 int mode_soccer_fsm_step(World *world, int state, double now, Motion *out_motion) {
+    fsm_reason_clear();
     int target = soccer_check_preempt(state, world, now);
     if (target >= 0 && target != state) {
         fsm_log_transition(
@@ -229,6 +239,7 @@ int mode_soccer_fsm_step(World *world, int state, double now, Motion *out_motion
     SkillStatus s = row->run(world, out_motion);
     g_last_cmd_v = out_motion->v;
 
+    fsm_reason_clear();
     int next_id = row->next(world, s, t_in_state);
     if (next_id != state) {
         fsm_log_transition(g_soccer_states, N_SOCCER_STATES, state, next_id,

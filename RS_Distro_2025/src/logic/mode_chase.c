@@ -34,6 +34,7 @@ int chase_next_ready(World *w, SkillStatus s, double t) {
         if (frames < 0) frames = 0;
     }
     if (frames >= READY_FRAMES) {
+        fsm_reason(C_CHASE, "self and ball both seen for %d frames (READY_FRAMES %d)", frames, READY_FRAMES);
         frames = 0;
         return C_CHASE;
     }
@@ -75,6 +76,7 @@ static SkillStatus run_wall_recover(World *w, Motion *out) {
 static int next_wall_recover(World *w, SkillStatus s, double t) {
     (void)w;
     (void)t;
+    fsm_reason(C_CHASE, "left the wall (%.1f cm from nearest wall)", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max));
     if (s == SKILL_DONE)
         return C_CHASE;
     return C_WALL_RECOVER;
@@ -89,6 +91,7 @@ int chase_next_unstick(World *w, SkillStatus s, double t) {
     (void)s;
     (void)w;
     // One full reverse+turn cycle.
+    fsm_reason(C_CHASE, "unstick reverse+turn cycle done (%.1fs)", t);
     if (t >= UNSTICK_REVERSE_S + UNSTICK_TURN_S)
         return C_CHASE;
     return C_UNSTICK;
@@ -110,6 +113,7 @@ int chase_next_lost(World *w, SkillStatus s, double t) {
         if (frames < 0) frames = 0;
     }
     if (frames >= READY_FRAMES) {
+        fsm_reason(C_READY, "self and ball seen again for %d frames (READY_FRAMES %d)", frames, READY_FRAMES);
         frames = 0;
         return C_READY;
     }
@@ -146,6 +150,7 @@ int chase_check_preempt(int state, const World *w, double now) {
     if (state != C_WALL_RECOVER && w->self.valid && !engaging_ball) {
         if (near_wall(w->self.pos, w->field_min, w->field_max, WALL_TRIGGER_MARGIN_CM)) {
             Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
+            fsm_reason(C_WALL_RECOVER, "%.1f cm from a wall (WALL_TRIGGER_MARGIN_CM %.1f) and heading outward: dot %.2f < -WALL_OUTWARD_DOT %.2f", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max), WALL_TRIGGER_MARGIN_CM, vec2_dot(w->self.heading, in), WALL_OUTWARD_DOT);
             if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
                 return C_WALL_RECOVER; // heading clearly outward
         }
@@ -160,6 +165,7 @@ int chase_check_preempt(int state, const World *w, double now) {
     int stalled = stall_update(&stall, now, w->self.pos,
                                w->self.valid && !stationary_state, g_last_cmd_v);
     if (stalled && state != C_UNSTICK) {
+        fsm_reason(C_UNSTICK, "stalled: driving for UNSTICK_STALL_S %.1fs but barely moved (last cmd v %.1f cm/s)", UNSTICK_STALL_S, g_last_cmd_v);
         stall_reset(&stall);
         return C_UNSTICK;
     }
@@ -172,6 +178,7 @@ int chase_check_preempt(int state, const World *w, double now) {
         ((w->self.valid == 0 && w->self.lost_frames > LOST_FRAMES) ||
          (w->ball.valid == 0 && w->ball.lost_frames > BALL_LOST_FRAMES))
     ) {
+        fsm_reason(C_LOST, "not seen: self lost_frames %d (LOST_FRAMES %d), ball lost_frames %d (BALL_LOST_FRAMES %d)", w->self.lost_frames, LOST_FRAMES, w->ball.lost_frames, BALL_LOST_FRAMES);
         return C_LOST;
     }
 
@@ -182,6 +189,7 @@ static int prev_state = -1;
 static double t_entered = 0;
 
 int mode_chase_fsm_step(World *world, int state, double now, Motion *out_motion) {
+    fsm_reason_clear();
     int target = chase_check_preempt(state, world, now);
     if (target >= 0 && target != state) {
         fsm_log_transition(
@@ -212,6 +220,7 @@ int mode_chase_fsm_step(World *world, int state, double now, Motion *out_motion)
     SkillStatus s = row->run(world, out_motion);
     g_last_cmd_v = out_motion->v;
 
+    fsm_reason_clear();
     int next_id = row->next(world, s, t_in_state);
     if (next_id != state) {
         fsm_log_transition(g_chase_states, N_CHASE_STATES, state, next_id,

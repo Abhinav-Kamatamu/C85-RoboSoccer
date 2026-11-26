@@ -101,6 +101,7 @@ int penalty_next_ready(World *w, SkillStatus s, double t) {
         if (frames < 0) frames = 0;
     }
     if (frames >= READY_FRAMES) {
+        fsm_reason(P_GOTO_STAGING, "self and ball both seen for %d frames (READY_FRAMES %d)", frames, READY_FRAMES);
         frames = 0;
         replan(w);
         return P_GOTO_STAGING;
@@ -144,10 +145,12 @@ int next_goto_staging(World *w, SkillStatus s, double t) {
         return P_GOTO_STAGING;
     }
     if (s == SKILL_DONE) {
+        fsm_reason(P_ALIGN, "reached staging: %.1f cm from staging point (STAGE_TOL_CM %.1f)", vec2_dist(w->self.pos, g_staging_point), STAGE_TOL_CM);
         g_align_attempts++;
         return P_ALIGN;
     }
     if (t > GOTO_STAGING_TIMEOUT_S) {
+        fsm_reason(P_REPOSITION, "goto staging timed out: %.1fs > GOTO_STAGING_TIMEOUT_S %.1f, still %.1f cm from staging point", t, GOTO_STAGING_TIMEOUT_S, vec2_dist(w->self.pos, g_staging_point));
         g_align_attempts = 0;
         return P_REPOSITION;
     }
@@ -161,12 +164,14 @@ SkillStatus run_align(World *w, Motion *out) {
 
 int next_align(World *w, SkillStatus s, double t) {
     if (w->ball.valid && vec2_dist(w->ball.pos, g_ball_at_plan) > MOVE_TOL_CM) {
+        fsm_reason(P_GOTO_STAGING, "ball moved %.1f cm since plan > MOVE_TOL_CM %.1f, replanning", vec2_dist(w->ball.pos, g_ball_at_plan), MOVE_TOL_CM);
         replan(w);
         return P_GOTO_STAGING;
     }
     if (s == SKILL_DONE) {
         double lat = perp_dist_to_line(w->self.pos, w->ball.pos, g_aim_target);
         if (lat < LAT_TOL_CM) {
+            fsm_reason(P_STRIKE, "aligned: heading stable and lateral %.1f cm < LAT_TOL_CM %.1f", lat, LAT_TOL_CM);
             g_align_attempts = 0; // real progress
             g_wall_recover_attempts = 0;
             return P_STRIKE;
@@ -186,9 +191,11 @@ int next_align(World *w, SkillStatus s, double t) {
         // We count it the same way the regular case does.
         g_align_attempts++;
         if (g_align_attempts > ALIGN_ATTEMPT_LIMIT) {
+            fsm_reason(P_REPOSITION, "heading aligned but lateral %.1f cm >= LAT_TOL_CM %.1f, attempt %d > ALIGN_ATTEMPT_LIMIT %d", lat, LAT_TOL_CM, g_align_attempts, ALIGN_ATTEMPT_LIMIT);
             g_align_attempts = 0;
             return P_REPOSITION;
         }
+        fsm_reason(P_GOTO_STAGING, "heading aligned but lateral %.1f cm >= LAT_TOL_CM %.1f (rotating cannot fix that), replanning, attempt %d", lat, LAT_TOL_CM, g_align_attempts);
         replan(w);
         return P_GOTO_STAGING;
     }
@@ -197,6 +204,7 @@ int next_align(World *w, SkillStatus s, double t) {
     // bounce. That loop could otherwise run forever with no escape at
     // all. g_align_attempts is the escape that survives the bounce.
     if (t > ALIGN_TIMEOUT_S || g_align_attempts > ALIGN_ATTEMPT_LIMIT) {
+        fsm_reason(P_REPOSITION, "align gave up: %.1fs in ALIGN (ALIGN_TIMEOUT_S %.1f), attempts %d (ALIGN_ATTEMPT_LIMIT %d)", t, ALIGN_TIMEOUT_S, g_align_attempts, ALIGN_ATTEMPT_LIMIT);
         g_align_attempts = 0;
         return P_REPOSITION;
     }
@@ -210,8 +218,10 @@ SkillStatus run_strike(World *w, Motion *out) {
 
 int next_strike(World *w, SkillStatus s, double t) {
     (void)w;
+    fsm_reason(P_FOLLOW_THROUGH, "strike made contact (ball pushed along the aim line, or lost while close ahead)");
     if (s == SKILL_DONE)
         return P_FOLLOW_THROUGH;
+    fsm_reason(P_REPOSITION, "%s (%.1fs in STRIKE, STRIKE_TIMEOUT_S %.1f, ABORT_TOL_DEG %.0f)", s == SKILL_FAILED ? "strike aborted: heading error past ABORT_TOL_DEG" : "strike timed out without contact", t, STRIKE_TIMEOUT_S, ABORT_TOL_DEG);
     if (s == SKILL_FAILED || t > STRIKE_TIMEOUT_S)
         return P_REPOSITION;
     return P_STRIKE;
@@ -230,9 +240,11 @@ int next_follow_through(World *w, SkillStatus s, double t) {
         // never moved it (or it was cut short), so just try again rather than
         // sitting in SHOT_DONE waiting for something that already failed.
         if (w->ball.valid && vec2_dist(w->ball.pos, g_ball_at_plan) < NO_SHOT_MOVED_CM) {
+            fsm_reason(P_GOTO_STAGING, "follow-through done but ball moved only %.1f cm since plan < NO_SHOT_MOVED_CM %.1f: no real shot, retrying", vec2_dist(w->ball.pos, g_ball_at_plan), NO_SHOT_MOVED_CM);
             replan(w);
             return P_GOTO_STAGING;
         }
+        fsm_reason(P_SHOT_DONE, "follow-through done, ball moved %.1f cm since plan", w->ball.valid ? vec2_dist(w->ball.pos, g_ball_at_plan) : -1.0);
         return P_SHOT_DONE;
     }
     return P_FOLLOW_THROUGH;
@@ -246,6 +258,7 @@ SkillStatus run_reposition(World *w, Motion *out) {
 int next_reposition(World *w, SkillStatus s, double t) {
     (void)t;
     if (s == SKILL_DONE) {
+        fsm_reason(P_GOTO_STAGING, "backed off REPO_DIST_CM %.0f cm, replanning", REPO_DIST_CM);
         replan(w);
         return P_GOTO_STAGING;
     }
@@ -262,10 +275,12 @@ int next_wall_recover(World *w, SkillStatus s, double t) {
     if (s == SKILL_DONE) {
         g_wall_recover_attempts++;
         if (g_wall_recover_attempts > WALL_RECOVER_ATTEMPT_LIMIT) {
+            fsm_reason(P_REPOSITION, "left the wall, but wall recovery #%d > WALL_RECOVER_ATTEMPT_LIMIT %d: backing off instead", g_wall_recover_attempts, WALL_RECOVER_ATTEMPT_LIMIT);
             g_wall_recover_attempts = 0;
             replan(w);
             return P_REPOSITION;
         }
+        fsm_reason(P_GOTO_STAGING, "left the wall (%.1f cm from nearest wall), replanning", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max));
         replan(w);
         return P_GOTO_STAGING;
     }
@@ -281,6 +296,7 @@ int penalty_next_unstick(World *w, SkillStatus s, double t) {
     (void)s;
     // Run one full reverse+turn cycle. The old exit
     if (t >= UNSTICK_REVERSE_S + UNSTICK_TURN_S) {
+        fsm_reason(P_GOTO_STAGING, "unstick reverse+turn cycle done (%.1fs), replanning", t);
         replan(w);
         return P_GOTO_STAGING;
     }
@@ -358,6 +374,7 @@ int next_shot_done(World *w, SkillStatus s, double t) {
         not_in_goal_frames = 0;
     }
     if (not_in_goal_frames >= GOAL_LEAVE_CONFIRM_FRAMES && t > RETRY_WAIT_S) {
+        fsm_reason(P_GOTO_STAGING, "ball resting outside the goal for %d frames and %.1fs > RETRY_WAIT_S %.1f: shooting again", not_in_goal_frames, t, RETRY_WAIT_S);
         not_in_goal_frames = 0;
         replan(w);
         return P_GOTO_STAGING;
@@ -381,6 +398,7 @@ int penalty_next_lost(World *w, SkillStatus s, double t) {
         if (frames < 0) frames = 0;
     }
     if (frames >= READY_FRAMES) {
+        fsm_reason(P_READY, "self and ball seen again for %d frames (READY_FRAMES %d)", frames, READY_FRAMES);
         frames = 0;
         return P_READY;
     }
@@ -423,6 +441,7 @@ int penalty_check_preempt(int state, const World *w, double now) {
         }
         if (near_wall(w->self.pos, w->field_min, w->field_max, wall_margin)) {
             Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
+            fsm_reason(P_WALL_RECOVER, "%.1f cm from a wall (trigger margin %.1f) and heading outward: dot %.2f < -WALL_OUTWARD_DOT %.2f", dist_to_nearest_wall(w->self.pos, w->field_min, w->field_max), wall_margin, vec2_dot(w->self.heading, in), WALL_OUTWARD_DOT);
             if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
                 return P_WALL_RECOVER; // heading clearly outward
         }
@@ -438,6 +457,7 @@ int penalty_check_preempt(int state, const World *w, double now) {
     int stalled = stall_update(&stall, now, w->self.pos,
                                w->self.valid && !stationary_state, g_last_cmd_v);
     if (stalled && state != P_UNSTICK) {
+        fsm_reason(P_UNSTICK, "stalled: driving for UNSTICK_STALL_S %.1fs but barely moved (last cmd v %.1f cm/s)", UNSTICK_STALL_S, g_last_cmd_v);
         stall_reset(&stall);
         return P_UNSTICK;
     }
@@ -446,6 +466,7 @@ int penalty_check_preempt(int state, const World *w, double now) {
         state != P_SHOT_DONE && state != P_LOST &&
         ((w->self.valid == 0 && w->self.lost_frames > LOST_FRAMES) ||
          (w->ball.valid == 0 && w->ball.lost_frames > BALL_LOST_FRAMES))) {
+        fsm_reason(P_LOST, "not seen: self lost_frames %d (LOST_FRAMES %d), ball lost_frames %d (BALL_LOST_FRAMES %d)", w->self.lost_frames, LOST_FRAMES, w->ball.lost_frames, BALL_LOST_FRAMES);
         return P_LOST;
     }
 
@@ -454,6 +475,7 @@ int penalty_check_preempt(int state, const World *w, double now) {
         Vec2 confirm_goal = w->their_goal;
         confirm_goal.x += (w->their_goal.x < field_center_x)
             ? -GOAL_CONFIRM_MARGIN_CM : GOAL_CONFIRM_MARGIN_CM;
+        fsm_reason(P_SHOT_DONE, "ball at (%.1f, %.1f) is in their goal", w->ball.pos.x, w->ball.pos.y);
         if (ball_in_goal(w->ball.pos, confirm_goal, w->goal_width_cm,
                          field_center_x, BALL_RADIUS_CM))
             return P_SHOT_DONE;
@@ -466,6 +488,7 @@ static int prev_state = -1;
 static double t_entered = 0;
 
 int mode_penalty_fsm_step(World *world, int state, double now, Motion *out_motion) {
+    fsm_reason_clear();
     int target = penalty_check_preempt(state, world, now);
     if (target >= 0 && target != state) {
         fsm_log_transition(
@@ -496,6 +519,7 @@ int mode_penalty_fsm_step(World *world, int state, double now, Motion *out_motio
     SkillStatus s = row->run(world, out_motion);
     g_last_cmd_v = out_motion->v;
 
+    fsm_reason_clear();
     int next_id = row->next(world, s, t_in_state);
     if (next_id != state) {
         fsm_log_transition(g_penalty_states, N_PENALTY_STATES, state, next_id,
