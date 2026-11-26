@@ -97,8 +97,9 @@ int main(int argc, char **argv)
    fprintf(stderr,"  mode - AI mode: 0 = SOCCER, 1 = PENALTY, 2 = CHASE\n");
    fprintf(stderr,"  colours_file - optional: a saved colour calibration to use instead of colours.dat\n");
    fprintf(stderr,"                 (keep several around for different lighting, e.g. colours_labroom.dat)\n");
-   fprintf(stderr,"  logItems - optional bitmask, 0 = no logging. bit0 = world.log, bit1 = annotated\n");
-   fprintf(stderr,"             display frames, bit2 = raw camera frames (see imageCaptureStartup())\n");
+   fprintf(stderr,"  logItems - optional bitmask, 0 = no logging. bit0 = text logs, bit1 = annotated\n");
+   fprintf(stderr,"             display frames, bit2 = raw camera frames; 7 = everything. Saved per run in\n");
+   fprintf(stderr,"             .local/logs/ (see tools/runlog/README_FOR_AI.md). 'b' bookmarks a moment.\n");
    exit(0);
   }
 

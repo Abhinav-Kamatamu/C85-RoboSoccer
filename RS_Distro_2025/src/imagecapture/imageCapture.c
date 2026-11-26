@@ -121,13 +121,13 @@ int got_Y=0;				                    // Got Y adjustment
 Image processing setup and frame processing loop
 **********************************************************************/
 // Ctrl+C / kill while logging: quit the same way 'q' does (robot stopped, run
-// log + replay buffer saved) instead of dying mid-write. A second Ctrl+C
-// exits immediately. Only installed when logging is on.
+// log + replay buffer saved) instead of dying mid-write. Pressing Ctrl+C a
+// third time exits immediately (not the second: some tools deliver one
+// Ctrl+C twice). Only installed when logging is on.
 static volatile sig_atomic_t g_quit_requested = 0;
 static void on_quit_signal(int sig)
 {
- if (g_quit_requested) {signal(sig,SIG_DFL); raise(sig); return;}
- g_quit_requested=1;
+ if (++g_quit_requested>=3) {signal(sig,SIG_DFL); raise(sig);}
 }
 
 int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode, const char *coloursCalFile, int logItems)
@@ -143,12 +143,11 @@ int imageCaptureStartup(char *devName, int rx, int ry, int own_col, int AI_mode,
  //	- own_col: Color of the bot controlled by this program (passed on from command line)
  //	- AI_mode: Penalties, Follow the Ball, or Robo-Soccer (passed on from command line)
  //	- coloursCalFile: NULL for colours.dat, or a specific calibration file to use instead
- // - logItems: 0 if you don't want any logging. last bit set if you want .log file, 2nd last
- //             bit set if you want to record frames from the display that shows during the game
- //             (red, blue, ball, bounding box), third last bit set if you want to record frames
- //             from the actual camera. All files stored in
- //             .local/logs/<timestamp>/{world.log, processed/<timestamp>.jpg camera/<timestamp>.jpg }
- //             TODO: Make this NOT REDUCE 30fps and (hopefully) not use gigabytes of storage!
+ // - logItems: 0 if you don't want any logging. bit0 = text logs (frames.jsonl, transitions,
+ //             positions.log, manifest), bit1 = frames from the display that shows during the game
+ //             (5 fps + 3 s replay buffer around events), bit2 = raw camera / unwarped field frames.
+ //             One folder per run in .local/logs/; see logic/runlog.h, framelog.h and
+ //             tools/runlog/README_FOR_AI.md. Images are written on a separate thread.
  //
  // This function performs the following tasks:
  //  - Initializes the webcam and opens the video input device
