@@ -143,12 +143,12 @@ int chase_check_preempt(int state, const World *w, double now) {
                         !near_wall(w->self.pos, w->field_min, w->field_max,
                                    HARD_WALL_MARGIN_CM);
     }
-    if (state != C_WALL_RECOVER && w->self.valid && !engaging_ball) {
-        if (near_wall(w->self.pos, w->field_min, w->field_max, WALL_TRIGGER_MARGIN_CM)) {
-            Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
-            if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
-                return C_WALL_RECOVER; // heading clearly outward
-        }
+    static StallDetector wall_stall;
+    if (state == C_WALL_RECOVER || engaging_ball) {
+        stall_reset(&wall_stall);
+    } else if (wall_stuck_update(&wall_stall, w, g_last_cmd_v)) {
+        stall_reset(&wall_stall);
+        return C_WALL_RECOVER;
     }
 
     // It was REALLY hard to figure out how to not STALL OMG, but now we have a StallDetector

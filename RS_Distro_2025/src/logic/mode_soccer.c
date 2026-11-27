@@ -223,14 +223,15 @@ static const StateDef g_soccer_states[] = {
 // internally. Now that S_ATTACK is a plain skill_chase() call with no such
 // protection of its own, it needs these checks like every other state.
 static int soccer_check_preempt(int state, const World *w, double now) {
-    if (state != S_WALL_RECOVER && w->self.valid &&
-        !near_goal_mouth(w->self.pos, WALL_TRIGGER_MARGIN_CM, w->field_min,
-                         w->field_max, w->own_goal, w->their_goal, w->goal_width_cm)) {
-        if (near_wall(w->self.pos, w->field_min, w->field_max, WALL_TRIGGER_MARGIN_CM)) {
-            Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
-            if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
-                return S_WALL_RECOVER;
-        }
+    static StallDetector wall_stall;
+    int wall_check = state != S_WALL_RECOVER &&
+        !near_goal_mouth(w->self.pos, BOT_FRONT_CM + WALL_CONTACT_CM, w->field_min,
+                         w->field_max, w->own_goal, w->their_goal, w->goal_width_cm);
+    if (!wall_check) {
+        stall_reset(&wall_stall);
+    } else if (wall_stuck_update(&wall_stall, w, g_last_cmd_v)) {
+        stall_reset(&wall_stall);
+        return S_WALL_RECOVER;
     }
 
     // Detect stalls

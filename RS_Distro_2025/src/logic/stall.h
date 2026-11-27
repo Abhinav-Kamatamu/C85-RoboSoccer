@@ -7,6 +7,7 @@
 
 #include <math.h>
 #include "ai_config.h"
+#include "geometry.h"
 #include "world.h"
 
 #define STALL_MAX_SAMPLES 96
@@ -23,16 +24,17 @@ static void stall_reset(StallDetector *s) {
 }
 
 // Input one frame. Returns 1 if the bot has been commanded at least
-// STALL_CMD_V_CMPS on average for UNSTICK_STALL_S yet moved less than
+// STALL_CMD_V_CMPS on average for window_s yet moved less than
 // STALL_SPREAD_CM in total over that time.
-static int stall_update(StallDetector *s, double now, Vec2 pos, int valid, double cmd_v) {
+static int stall_update_window(StallDetector *s, double now, Vec2 pos, int valid,
+                               double cmd_v, double window_s) {
     if (!valid) {
         s->n = 0;
         return 0;
     }
     // drop samples older than the window
     int keep_from = 0;
-    while (keep_from < s->n && now - s->t[keep_from] > UNSTICK_STALL_S)
+    while (keep_from < s->n && now - s->t[keep_from] > window_s)
         keep_from++;
     if (keep_from > 0) {
         for (int i = keep_from; i < s->n; i++) {
@@ -58,7 +60,7 @@ static int stall_update(StallDetector *s, double now, Vec2 pos, int valid, doubl
     s->n++;
 
     // need a (nearly) full window of history
-    if (s->n < 8 || now - s->t[0] < UNSTICK_STALL_S * 0.9)
+    if (s->n < 8 || now - s->t[0] < window_s * 0.9)
         return 0;
     double minx = s->p[0].x, maxx = minx, miny = s->p[0].y, maxy = miny, vsum = 0;
     for (int i = 0; i < s->n; i++) {
@@ -70,6 +72,33 @@ static int stall_update(StallDetector *s, double now, Vec2 pos, int valid, doubl
     }
     double spread = hypot(maxx - minx, maxy - miny);
     return (vsum / s->n >= STALL_CMD_V_CMPS) && spread < STALL_SPREAD_CM;
+}
+
+static int stall_update(StallDetector *s, double now, Vec2 pos, int valid, double cmd_v) {
+    return stall_update_window(s, now, pos, valid, cmd_v, UNSTICK_STALL_S);
+}
+
+// Stuck on a wall = a corner of the body is touching a wall, we are driving
+// into that wall, and we have not moved for WALL_STALL_S. The window only
+// fills while all of that holds, so it is also the timer. Touching or
+// sliding along a wall is fine.
+static int wall_stuck_update(StallDetector *s, const World *w, double cmd_v) {
+    if (!w->self.valid) {
+        stall_reset(s);
+        return 0;
+    }
+    Vec2 in;
+    double d = footprint_wall_dist(w->self.pos, w->self.heading,
+                                   w->field_min, w->field_max, &in);
+    // Driving forward pushes with the nose, reversing pushes with the tail
+    double out_dot = -vec2_dot(w->self.heading, in);
+    if (cmd_v < 0)
+        out_dot = -out_dot;
+    if (d > WALL_CONTACT_CM || out_dot < WALL_OUTWARD_DOT) {
+        stall_reset(s);
+        return 0;
+    }
+    return stall_update_window(s, w->now, w->self.pos, 1, cmd_v, WALL_STALL_S);
 }
 
 #endif

@@ -139,6 +139,32 @@ double dist_to_nearest_wall(Vec2 pos, Vec2 field_min, Vec2 field_max) {
     return m;
 }
 
+double footprint_wall_dist(Vec2 pos, Vec2 heading, Vec2 field_min, Vec2 field_max,
+                           Vec2 *inward_out) {
+    // The bot is a full width block plus a narrower prong box in front.
+    // Against straight walls the closest point of that shape is always one of
+    // its outer corners, so checking these 6 is exact. The prong box's back
+    // corners sit on the block's front edge, so they never win.
+    Vec2 side = {-heading.y, heading.x};
+    double fwd[6] = {BOT_FRONT_CM, BOT_FRONT_CM,
+                     BOT_BODY_FRONT_CM, BOT_BODY_FRONT_CM,
+                     -BOT_REAR_CM, -BOT_REAR_CM};
+    double lat[6] = {BOT_PRONG_HALF_WIDTH_CM, -BOT_PRONG_HALF_WIDTH_CM,
+                     BOT_HALF_WIDTH_CM, -BOT_HALF_WIDTH_CM,
+                     BOT_HALF_WIDTH_CM, -BOT_HALF_WIDTH_CM};
+    double best = 1e9;
+    for (int i = 0; i < 6; i++) {
+        Vec2 c = vec2_add(pos, vec2_add(vec2_scale(heading, fwd[i]), vec2_scale(side, lat[i])));
+        double d = dist_to_nearest_wall(c, field_min, field_max);
+        if (d < best) {
+            best = d;
+            if (inward_out)
+                *inward_out = direction_away_from_nearest_wall(c, field_min, field_max);
+        }
+    }
+    return best;
+}
+
 Vec2 plan_waypoint(
     Vec2 ball_pos, Vec2 aim_target, double stage_dist,
     Vec2 field_min, Vec2 field_max, double margin

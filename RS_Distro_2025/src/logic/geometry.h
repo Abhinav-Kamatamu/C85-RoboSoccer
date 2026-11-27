@@ -64,6 +64,13 @@ Vec2 direction_away_from_nearest_wall(Vec2 pos, Vec2 field_min, Vec2 field_max);
 // Distance from `pos` to whichever of the 4 walls is nearest.
 double dist_to_nearest_wall(Vec2 pos, Vec2 field_min, Vec2 field_max);
 
+// Distance from the closest corner of the bot's body (the full width block
+// plus the prong box from ai_config.h, around pos, rotated by heading) to
+// the nearest wall. Negative means a corner reads past the wall. If inward_out
+// is not NULL it gets the direction away from that wall.
+double footprint_wall_dist(Vec2 pos, Vec2 heading, Vec2 field_min, Vec2 field_max,
+                           Vec2 *inward_out);
+
 // When the ball is near a wall, `plan_waypoint` can't put a staging point
 // behind it on the goal line without landing outside the field. Instead, stage
 // on the WALL side of the ball (clamped to the field bounds) and push it

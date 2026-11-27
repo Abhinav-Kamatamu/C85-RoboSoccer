@@ -417,30 +417,18 @@ static const StateDef g_penalty_states[] = {
 // **** global preemptive moves, checked before the state table every frame.
 // Priority when more than one fires is wall_recover > unstick > lost > goal
 int penalty_check_preempt(int state, const World *w, double now) {
-    if (state != P_WALL_RECOVER && state != P_FOLLOW_THROUGH && w->self.valid) {
-        static double last_wall_margin = WALL_TRIGGER_MARGIN_CM;
-        double wall_margin;
-        if (w->ball.valid) {
-            wall_margin = near_wall(w->ball.pos, w->field_min, w->field_max, DEFAULT_WALL_MARGIN_CM)
-                    ? WALL_TRIGGER_MARGIN_BALLWALL_CM
-                    : WALL_TRIGGER_MARGIN_CM;
-            if (state == P_GOTO_STAGING || state == P_ALIGN)
-                wall_margin = fmin(wall_margin, WALL_TRIGGER_MARGIN_STAGING_CM);
-            last_wall_margin = wall_margin;
-        } else {
-            wall_margin = last_wall_margin;
-        }
-        // Both goals sit ON the end walls, so driving in to score (P_STRIKE
-        // isn't excluded above the way P_FOLLOW_THROUGH is) necessarily
-        // looks like "near wall, heading outward" - skip the trigger at
-        // the goal mouth specifically, same margin as the real check below.
-        if (near_wall(w->self.pos, w->field_min, w->field_max, wall_margin) &&
-            !near_goal_mouth(w->self.pos, wall_margin, w->field_min,
-                             w->field_max, w->own_goal, w->their_goal, w->goal_width_cm)) {
-            Vec2 in = direction_away_from_nearest_wall(w->self.pos, w->field_min, w->field_max);
-            if (vec2_dot(w->self.heading, in) < -WALL_OUTWARD_DOT)
-                return P_WALL_RECOVER; // heading clearly outward
-        }
+    // Both goals sit ON the end walls, so driving in to score (P_STRIKE
+    // isn't excluded the way P_FOLLOW_THROUGH is) pushes into a wall by
+    // design. Skip the trigger at the goal mouth specifically.
+    static StallDetector wall_stall;
+    int wall_check = state != P_WALL_RECOVER && state != P_FOLLOW_THROUGH &&
+        !near_goal_mouth(w->self.pos, BOT_FRONT_CM + WALL_CONTACT_CM, w->field_min,
+                         w->field_max, w->own_goal, w->their_goal, w->goal_width_cm);
+    if (!wall_check) {
+        stall_reset(&wall_stall);
+    } else if (wall_stuck_update(&wall_stall, w, g_last_cmd_v)) {
+        stall_reset(&wall_stall);
+        return P_WALL_RECOVER;
     }
 
     // Finally have a way to detect stalls now

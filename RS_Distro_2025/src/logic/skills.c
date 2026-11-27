@@ -406,24 +406,81 @@ SkillStatus skill_hold(const World *w, Motion *out) {
     return SKILL_RUNNING;
 }
 
+// 1 if the ball's centre is in the prong basket, in the bot's own frame
+// (fwd along heading, lat sideways). See BALL_WITH_US_SLACK_CM.
+int ball_with_us(const World *w) {
+    if (!w->self.valid || !w->ball.valid)
+        return 0;
+    Vec2 d = vec2_sub(w->ball.pos, w->self.pos);
+    Vec2 side = {-w->self.heading.y, w->self.heading.x};
+    double fwd = vec2_dot(d, w->self.heading);
+    double lat = vec2_dot(d, side);
+    return fwd >= BOT_BODY_FRONT_CM &&
+           fwd <= BOT_FRONT_CM + BALL_RADIUS_CM + BALL_WITH_US_SLACK_CM &&
+           fabs(lat) <= BOT_PRONG_HALF_WIDTH_CM;
+}
+
 SkillStatus skill_leave_wall(const World *w, Motion *out, int reset) {
     static double committed_sign = 1.0;
+    // Carry mode. The ball was with us when recovery started, so turn off the
+    // wall with it instead of backing away from it.
+    static int carry = 0, carry_miss = 0;
+    static Vec2 carry_dir = {1, 0};
+    static double carry_hdg = 0, carry_moved_t = 0;
+    static Vec2 carry_in = {1, 0};
     if (reset) {
         committed_sign = 1.0;
         turn_burst_reset();
+        carry = ball_with_us(w);
+        carry_miss = 0;
+        carry_hdg = angle_of(w->self.heading);
+        carry_moved_t = w->now;
+        footprint_wall_dist(w->self.pos, w->self.heading, w->field_min, w->field_max, &carry_in);
+        // Turn toward 45deg into the field, on whichever side along the wall
+        // their goal is. If it's straight ahead along the wall normal, use the
+        // field centre instead.
+        Vec2 along = {-carry_in.y, carry_in.x};
+        Vec2 centre = vec2_scale(vec2_add(w->field_min, w->field_max), 0.5);
+        double g = vec2_dot(along, vec2_sub(w->their_goal, w->self.pos));
+        if (fabs(g) < 5.0)
+            g = vec2_dot(along, vec2_sub(centre, w->self.pos));
+        carry_dir = vec2_normalize(vec2_add(carry_in, vec2_scale(along, g >= 0 ? 1.0 : -1.0)));
     }
-    if (!near_wall(
-        w->self.pos, w->field_min, w->field_max,
-        WALL_RECOVER_CLEAR_MARGIN_CM
-    )) {
+    if (carry) {
+        double hdg = angle_of(w->self.heading);
+        if (fabs(angle_diff_rad(hdg, carry_hdg)) > deg_to_rad(WALL_CARRY_MOVED_DEG)) {
+            carry_hdg = hdg;
+            carry_moved_t = w->now;
+        }
+        carry_miss = ball_with_us(w) ? 0 : carry_miss + 1;
+        if (carry_miss > BALL_WITH_US_HOLD_FRAMES || w->now - carry_moved_t > WALL_CARRY_STALL_S) {
+            // Lost the ball or the turn itself is jammed, fall back to reversing
+            carry = 0;
+            committed_sign = 1.0;
+            turn_burst_reset();
+        } else if (vec2_dot(w->self.heading, carry_in) >= WALL_CARRY_DONE_DOT) {
+            out->v = 0;
+            out->w = 0;
+            carry = 0;
+            return SKILL_DONE;
+        } else {
+            double e = stabilize_turn_sign(angle_diff_rad(angle_of(carry_dir), hdg), &committed_sign);
+            out->v = WALL_CARRY_V_CMPS;
+            out->w = (e >= 0) ? WALL_CARRY_W_RADPS : -WALL_CARRY_W_RADPS;
+            return SKILL_RUNNING;
+        }
+    }
+    // Done once the whole body is off the wall, not once the tracked point is
+    // far from it. n points away from whichever wall the closest corner is on.
+    Vec2 n;
+    if (footprint_wall_dist(
+        w->self.pos, w->self.heading, w->field_min, w->field_max, &n
+    ) > WALL_CLEAR_CM) {
         out->v = 0;
         out->w = 0;
         turn_burst_reset();
         return SKILL_DONE;
     }
-    Vec2 n = direction_away_from_nearest_wall(
-        w->self.pos, w->field_min, w->field_max
-    );
     double hdg = angle_of(w->self.heading);
     // Error to face away from the wall (drive forward out) and error to face
     // into it (drive backward out). Reversing means the tail is in front, so a bot that is

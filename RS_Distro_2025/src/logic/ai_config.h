@@ -38,13 +38,16 @@
 #define SPEED_API_TO_DEGPS_GAIN  2.1  // 5.133 bench x3 gear ratio x 12.8/20.5
 
 // Bot footprint relative to the TRACKED POINT (uniform blob centroid).
-// Measured: 26.5cm long (back -> axle 10, axle -> front 16.5, bucket included),
-// wheel centres 20.5cm apart with ~4cm outside each, so 28.5cm wide. Jersey
-// is 17.3 (front-to-back) x 5.5, starting 1cm from the back, so its centre is
-// 9.65cm from the back.
-#define BOT_FRONT_CM          16.85  // tracked point -> prong tips
-#define BOT_REAR_CM           9.65   // tracked point -> back of bot
+// The jersey is 17.3 (front-to-back) x 5.5, centred side to side, with its
+// back edge on the back of the bot, so its centre is 8.65cm from the back.
+// The bot is a full width block under the jersey (wheel centres 20.5cm apart
+// with ~4cm outside each, so 28.5cm wide) plus a narrower prong box that
+// sticks out 7.3cm past the front of the jersey and is 12.5cm wide.
+#define BOT_FRONT_CM          15.95  // tracked point -> prong tips
+#define BOT_BODY_FRONT_CM     8.65   // tracked point -> front of the full width block
+#define BOT_REAR_CM           8.65   // tracked point -> back of bot
 #define BOT_HALF_WIDTH_CM     14.25  // half the body width
+#define BOT_PRONG_HALF_WIDTH_CM 6.25 // half the prong box width
 
 // **** perception; pixel -> cm (bench test 1, NOT uniform in x/y) ****
 #define PX_PER_CM_X           7.5
@@ -120,7 +123,12 @@
 #define RETRY_WAIT_S          1.0
 
 // **** wall / unstick ****
-#define WALL_RECOVER_CLEAR_MARGIN_CM 24.0 // distance from a wall that ends P_WALL_RECOVER
+// Wall recovery only fires when a corner of the body is within
+// WALL_CONTACT_CM of a wall, we are driving into it, and we haven't moved for
+// WALL_STALL_S. It ends once every corner is WALL_CLEAR_CM off the wall.
+#define WALL_CONTACT_CM       3.0
+#define WALL_STALL_S          0.5
+#define WALL_CLEAR_CM         5.0
 #define WALL_RECOVER_V_CMPS   20.0
 // Only drive (fwd/rev) within this many degrees of straight at/away
 // from the wall. Beyond that, turn in place first.
@@ -173,13 +181,8 @@
 #define STALL_CMD_V_CMPS      8.0
 #define STALL_SPREAD_CM       3.0
 #define MIN_WALL_STAGE_CM     16.0
-// Wall RECOVERY triggers only inside this distance of a wall (heading
-// outward too). <ust be clearly smaller than DEFAULT_WALL_MARGIN_CM
-// (the staging clamp), else arriving at a staging point retriggers
-// recovery every time.
-#define WALL_TRIGGER_MARGIN_CM 16.0
-// ...and only when heading points clearly OUT of the field: dot(heading,
-// inward normal) below -this (~20deg past parallel), not just "< 0".
+// "Driving into the wall" means the pushing end points clearly OUT of the
+// field: dot(heading, inward normal) below -this (~20deg past parallel).
 #define WALL_OUTWARD_DOT       0.35
 // Wall-push staging (get on the wall side of the ball, push it off) only
 // applies to a ball actually within this of the wall.
@@ -190,11 +193,6 @@
 // short of BOT_HALF_WIDTH_CM: raising it scored worse in simulation.
 #define WALL_NOSE_MARGIN_CM    20.0
 #define WALL_TAIL_MARGIN_CM    12.0
-#define WALL_TRIGGER_MARGIN_BALLWALL_CM 10.0  // looser trigger when the ball itself is near a wall
-// While travelling to/aligning at a staging point, the trigger must sit
-// inside the staging clamp (tail margin) or it activates recovery on every
-// arrival at a wall-adjacent staging point.
-#define WALL_TRIGGER_MARGIN_STAGING_CM  9.0
 // Strike aims at a point this far beyond the ball on the aim line
 // (not the goal itself), so it converges onto the line by contact
 // instead of running parallel to it.
@@ -236,6 +234,22 @@
 #define CARRY_DEADBAND_DEG     8.0
 #define ENGAGE_BALL_DEG        60.0
 #define HARD_WALL_MARGIN_CM    12.0
+// Ball "with us" = its centre is in the prong basket in the bot's own frame.
+// Forward from the front of the block to BALL_WITH_US_SLACK_CM past where a
+// ball just touching the prong tips would sit, and sideways no wider than the
+// prong box. Held through BALL_WITH_US_HOLD_FRAMES of dropout since the prongs
+// can hide the ball from the camera.
+#define BALL_WITH_US_SLACK_CM    2.0
+#define BALL_WITH_US_HOLD_FRAMES 6
+// Stuck on a wall with the ball: turn off the wall with it instead of backing
+// away. A little forward speed keeps the ball pressed in and keeps
+// drive_shape_power() from spin pulsing at MIN_SPIN_POWER. It stays under
+// STALL_CMD_V_CMPS so the turn can't trip the general stall detector.
+#define WALL_CARRY_V_CMPS     6.0
+#define WALL_CARRY_W_RADPS    3.0
+#define WALL_CARRY_DONE_DOT   0.5   // done once dot(heading, inward normal) reaches this (~30deg into the field)
+#define WALL_CARRY_STALL_S    0.5   // heading moved less than WALL_CARRY_MOVED_DEG for this long => give up and reverse
+#define WALL_CARRY_MOVED_DEG  5.0
 
 // **** soccer mode (intercept/clear/mark) ****** no bench data
 // behind any of these yet, legit js guesses to be tuned once wired up ****
